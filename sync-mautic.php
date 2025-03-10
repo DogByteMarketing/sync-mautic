@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.0
+ * Version: 1.0.1
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -29,7 +29,7 @@ register_deactivation_hook(__FILE__, array(__NAMESPACE__ . '\Sync_Mautic', 'deac
 
 class Sync_Mautic
 {
-	const SYNC_MAUTIC_VERSION = '1.0.0';
+	const SYNC_MAUTIC_VERSION = '1.0.1';
 
 	/**
 	 * Sync Mautic Settings
@@ -915,7 +915,7 @@ class Sync_Mautic
 	 */
 	public function base_url_render() {
 	?>
-		<input type='text' name='sync_mautic_settings[base_url]' placeholder="https://mautic.domain.com" value='<?php echo esc_attr($this->base_url); ?>' style="width: 400px;">
+		<input type='text' name='dogbytemarketing_sync_mautic_settings[base_url]' placeholder="https://mautic.domain.com" value='<?php echo esc_attr($this->base_url); ?>' style="width: 400px;">
 		<p>The base url of your Mautic instance.<br />
 		Example: https://mautic.domain.com</p>
 	<?php
@@ -928,7 +928,7 @@ class Sync_Mautic
 	 */
 	public function client_id_render() {
 	?>
-		<input type='text' name='sync_mautic_settings[client_id]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_id); ?>' style="width: 400px;">
+		<input type='text' name='dogbytemarketing_sync_mautic_settings[client_id]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_id); ?>' style="width: 400px;">
 		<p>The Client ID or Public Key from Mautic Settings -> API Creditials.</p>
 	<?php
 	}
@@ -940,7 +940,7 @@ class Sync_Mautic
 	 */
 	public function client_secret_render() {
 	?>
-		<input type='password' name='sync_mautic_settings[client_secret]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_secret); ?>' style="width: 400px;">
+		<input type='password' name='dogbytemarketing_sync_mautic_settings[client_secret]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_secret); ?>' style="width: 400px;">
 		<p>The Client Secret or Secret Key from Mautic Settings -> API Creditials.</p>
 	<?php
 	}
@@ -953,11 +953,11 @@ class Sync_Mautic
 	public function order_tagging_render() {
 		$order_tagging = isset($this->settings['order_tagging']) ? $this->settings['order_tagging'] : array();
     ?>
-    <input type="checkbox" name="sync_mautic_settings[order_tagging][]" value="categories"<?php echo in_array('categories', $order_tagging) ? ' checked' : ''; ?>>
+    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="categories"<?php echo in_array('categories', $order_tagging) ? ' checked' : ''; ?>>
     <label for="categories">Categories</label><br />
-    <input type="checkbox" name="sync_mautic_settings[order_tagging][]" value="brands"<?php echo in_array('brands', $order_tagging) ? ' checked' : ''; ?>>
+    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="brands"<?php echo in_array('brands', $order_tagging) ? ' checked' : ''; ?>>
     <label for="brands">Brands</label><br />
-    <input type="checkbox" name="sync_mautic_settings[order_tagging][]" value="products"<?php echo in_array('products', $order_tagging) ? ' checked' : ''; ?>>
+    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="products"<?php echo in_array('products', $order_tagging) ? ' checked' : ''; ?>>
     <label for="products">Products</label><br />
 		<p>
 			This will add tags to existing contacts for the categories and/or brands of products they have purchased that have <strong>completed</strong> statuses. This will sync past orders.<br />
@@ -974,7 +974,7 @@ class Sync_Mautic
 	public function checkout_optin_render() {
 		$checkout_optin = isset($this->settings['checkout_optin']) ? $this->settings['checkout_optin'] : 'disabled';
     ?>
-    <select name="sync_mautic_settings[checkout_optin]" id="checkout_checkbox" style="width: 400px;">
+    <select name="dogbytemarketing_sync_mautic_settings[checkout_optin]" id="checkout_checkbox" style="width: 400px;">
 			<option value="disabled" <?php selected($checkout_optin, 'disabled'); ?>>Disabled</option>
 			<option value="unchecked" <?php selected($checkout_optin, 'unchecked'); ?>>Unchecked</option>
 			<option value="checked" <?php selected($checkout_optin, 'checked'); ?>>Checked</option>
@@ -991,7 +991,7 @@ class Sync_Mautic
 	public function resync_past_orders_render() {
     $resync_past_orders = isset($this->settings['resync_past_orders']) ? $this->settings['resync_past_orders'] : '';
 	?>
-    <input type="checkbox" name="sync_mautic_settings[resync_past_orders]" id="resync_past_orders" <?php checked(1, $resync_past_orders, true); ?> /> Yes
+    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[resync_past_orders]" id="resync_past_orders" <?php checked(1, $resync_past_orders, true); ?> /> Yes
 		<p><strong>If you make changes to order tagging and want to resync past orders to reflect those changes, check this box.</strong></p>
 	<?php
 	}
@@ -1004,7 +1004,7 @@ class Sync_Mautic
 	public function debug_mode_render() {
     $debug_mode = isset($this->settings['debug_mode']) ? $this->settings['debug_mode'] : '';
 	?>
-    <input type="checkbox" name="sync_mautic_settings[debug_mode]" id="debug_mode" <?php checked(1, $debug_mode, true); ?> /> Enable
+    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[debug_mode]" id="debug_mode" <?php checked(1, $debug_mode, true); ?> /> Enable
 	<?php
 	}
 	
@@ -1113,10 +1113,10 @@ class Sync_Mautic
 				echo wp_kses(
 					$this->admin_notice['message'],
 						array(
-								'a' => array(
-										'href' => array(),
-										'title' => array(),
-								),
+							'a' => array(
+								'href' => array(),
+								'title' => array(),
+							),
 						)
 					);
 				?>
