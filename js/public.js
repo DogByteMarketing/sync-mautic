@@ -7,10 +7,15 @@ jQuery(document).ready(function ($) {
 
     let email = $newsletterSignup.find(".email").val();
     let tag   = $newsletterSignup.find(".tag").val();
-    let data  = {
-      email: email,
-      tag: tag,
-    };
+    let data  = {};
+
+    if (email) {
+      data.email = email;
+    }
+
+    if (tag) {
+      data.tag = tag;
+    }
 
     $newsletterSignup.find(".newsletter-signup-responses p.success").text('');
     $newsletterSignup.find(".newsletter-signup-responses p.error").text('');

@@ -4,7 +4,7 @@ Donate link:
 Tags: sync, mautic, marketing, email, email marketing
 Requires at least: 6.5
 Tested up to: 6.6.2
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -45,6 +45,10 @@ Features:
 
 
 == Changelog ==
+
+= 1.0.2 =
+* Bugfix: Empty tag added into Mautic when the shortcode's tag attribute was empty.
+* Added: Beta compatibility check for shortcode so previous beta users do not need to update their shortcode.
 
 = 1.0.1 =
 * Bugfix: Saving Settings

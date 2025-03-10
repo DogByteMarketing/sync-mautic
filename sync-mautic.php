@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.1
+ * Version: 1.0.2
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -29,7 +29,7 @@ register_deactivation_hook(__FILE__, array(__NAMESPACE__ . '\Sync_Mautic', 'deac
 
 class Sync_Mautic
 {
-	const SYNC_MAUTIC_VERSION = '1.0.1';
+	const SYNC_MAUTIC_VERSION = '1.0.2';
 
 	/**
 	 * Sync Mautic Settings
@@ -52,7 +52,7 @@ class Sync_Mautic
 	/**
 	 * Mautic Client ID
 	 *
-	 * @since    1.0.4
+	 * @since    1.0.0
 	 * @access   private
 	 * @var      string    $client_id    Mautic API Key
 	 */
@@ -61,7 +61,7 @@ class Sync_Mautic
 	/**
 	 * Mautic Secret Key
 	 *
-	 * @since    1.0.4
+	 * @since    1.0.0
 	 * @access   private
 	 * @var      string    $client_secret   Mautic API Key
 	 */
@@ -70,7 +70,7 @@ class Sync_Mautic
 	/**
 	 * Mautic Checkout Optin
 	 *
-	 * @since    1.0.3
+	 * @since    1.0.0
 	 * @access   private
 	 * @var      string    $checkout_optin      Mautic Checkout Optin
 	 */
@@ -108,9 +108,15 @@ class Sync_Mautic
 			add_action('rest_api_init', array($this, 'add_endpoints'));
 			add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
 			add_action('wp_loaded', array($this, 'woocommerce_init'));
-			add_action('admin_init', array($this, 'migrate_version_check'));
 
-			add_shortcode('mautic_form', array($this, 'mautic_form'));
+			// We need to handle compatibility for those on the beta
+			$compatibility_mode = get_option('mautic_sync_settings');
+
+			if ($compatibility_mode) {
+				add_shortcode('mautic', array($this, 'mautic_form'));
+			} else {
+				add_shortcode('mautic_form', array($this, 'mautic_form'));
+			}
 
 			if (is_admin()) {
 				$sync_mautic_start_time = get_option('dogbytemarketing_sync_mautic_start_time');
