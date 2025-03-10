@@ -1,15 +1,13 @@
 === Sync Mautic ===
 Contributors: dogbytemarketing, polyplugins
-Donate link: 
 Tags: sync, mautic, marketing, email, email marketing
-Requires at least: 6.5
-Tested up to: 6.7.1
+Tested up to: 6.7
 Stable tag: 1.0.5
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
-Bridge Mautic with WordPress and WooCommerce, automatically tagging contacts with their purchases, categories, and brands, while offering seamless lead collection through OptinMonster or custom forms.
+Bridge Mautic with WordPress, WooCommerce, and OptinMonster, automatically tagging contacts with their purchases, categories, and brands.
 
 
 == Description ==
