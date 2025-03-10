@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.3
+ * Version: 1.0.4
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -106,7 +106,14 @@ class Sync_Mautic
 		if ($this->base_url && $this->client_id && $this->client_secret) {
 			add_action('rest_api_init', array($this, 'add_endpoints'));
 			add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
-			add_action('wp_loaded', array($this, 'woocommerce_init'));
+			
+			// WooCommerce
+			add_action('woocommerce_order_status_completed', array($this, 'order_tagging'));
+
+			if ($this->checkout_optin !== 'disabled') {
+				add_action('woocommerce_review_order_before_submit', array($this, 'add_checkout_optin'));
+				add_action('woocommerce_checkout_order_processed', array($this, 'add_checkout_lead'));
+			}
 
 			// We need to handle compatibility for those previously on the beta
 			if ($this->has_used_beta()) {
@@ -153,22 +160,6 @@ class Sync_Mautic
 				'nonce'    => wp_create_nonce('newsletter-signup-nonce'),
 			)
 		);
-	}
-	
-	/**
-	 * Check if WooCommerce is enabled and add necessary hooks
-	 *
-	 * @return void
-	 */
-	public function woocommerce_init() {
-		if (class_exists('WooCommerce')) {
-			if ($this->checkout_optin !== 'disabled') {
-				add_action('woocommerce_review_order_before_submit', array($this, 'add_checkout_optin'));
-				add_action('woocommerce_checkout_order_processed', array($this, 'add_checkout_lead'));
-			}
-
-			add_action('woocommerce_order_status_completed', array($this, 'order_tagging'));
-		}
 	}
 
 	/**
@@ -665,7 +656,31 @@ class Sync_Mautic
 			$request = wp_remote_request($this->base_url . '/api/contacts/new', $args);
 
 			if (!is_wp_error($request)) {
-				self::debug('Added Lead: ' . $email);
+				$response_body = wp_remote_retrieve_body($request);
+
+				// Decode the JSON response
+				$response_data = json_decode($response_body, true);
+
+				if ($response_data) {
+					$contact = isset($response_data['contact']) ? $response_data['contact'] : '';
+					
+					if ($contact) {
+						$id           = isset($contact['id']) ? $contact['id'] : '';
+						$is_published = isset($contact['isPublished']) ? $contact['isPublished'] : '';
+
+						if (!$id) {
+							self::error('The response from Mautic was missing the id.');
+						} else if (!$is_published) {
+							self::error('The response from Mautic was indicated the lead was not published.');
+						} else {
+							self::debug('Added Lead #' . $id . ': ' . $email);
+						}
+					} else {
+						self::error('The response from Mautic was malformed');
+					}
+				} else {
+					self::error('The response from Mautic was empty');
+				}
 			} else {
 				$error_message = $request->get_error_message() ? $request->get_error_message() : 'WordPress encountered an error when attempting to add the lead: ' . $email;
 

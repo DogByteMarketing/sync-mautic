@@ -3,8 +3,8 @@ Contributors: dogbytemarketing, polyplugins
 Donate link: 
 Tags: sync, mautic, marketing, email, email marketing
 Requires at least: 6.5
-Tested up to: 6.6.2
-Stable tag: 1.0.3
+Tested up to: 6.7.1
+Stable tag: 1.0.4
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -45,6 +45,10 @@ Features:
 
 
 == Changelog ==
+
+= 1.0.4 =
+* Added: Additional debugging to checkout lead
+* Removed: WooCommerce init method
 
 = 1.0.3 =
 * Added: Old rest routes for those previously on the beta
