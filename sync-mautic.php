@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.2
+ * Version: 1.0.3
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -29,7 +29,6 @@ register_deactivation_hook(__FILE__, array(__NAMESPACE__ . '\Sync_Mautic', 'deac
 
 class Sync_Mautic
 {
-	const SYNC_MAUTIC_VERSION = '1.0.2';
 
 	/**
 	 * Sync Mautic Settings
@@ -109,10 +108,8 @@ class Sync_Mautic
 			add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
 			add_action('wp_loaded', array($this, 'woocommerce_init'));
 
-			// We need to handle compatibility for those on the beta
-			$compatibility_mode = get_option('mautic_sync_settings');
-
-			if ($compatibility_mode) {
+			// We need to handle compatibility for those previously on the beta
+			if ($this->has_used_beta()) {
 				add_shortcode('mautic', array($this, 'mautic_form'));
 			} else {
 				add_shortcode('mautic_form', array($this, 'mautic_form'));
@@ -588,6 +585,28 @@ class Sync_Mautic
 				'permission_callback' => '__return_true',
 			)
 		);
+
+		// We need to handle compatibility for those previously on the beta
+		if ($this->has_used_beta()) {
+			register_rest_route(
+				'mautic/v1',
+				'/add-lead/',
+				array(
+					'methods' => 'POST',
+					'callback' => array($this, 'get_optionmonster_request'),
+					'permission_callback' => '__return_true',
+				)
+			);
+			register_rest_route(
+				'newsletter/v1',
+				'/add-lead/',
+				array(
+					'methods' => 'POST',
+					'callback' => array($this, 'get_lead_request'),
+					'permission_callback' => '__return_true',
+				)
+			);
+		}
 	}
 	
 	/**
@@ -1206,6 +1225,17 @@ class Sync_Mautic
   public static function deactivation() {
     wp_clear_scheduled_hook('dogbytemarketing_sync_mautic_past_orders');
   }
+	
+	/**
+	 * Check if previously used beta
+	 *
+	 * @return mixed $has_used_beta
+	 */
+	private function has_used_beta() {
+		$has_used_beta = get_option('mautic_sync_settings');
+
+		return $has_used_beta;
+	}
 	
 	/**
 	 * WooCommerce logging

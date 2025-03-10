@@ -4,7 +4,7 @@ Donate link:
 Tags: sync, mautic, marketing, email, email marketing
 Requires at least: 6.5
 Tested up to: 6.6.2
-Stable tag: 1.0.2
+Stable tag: 1.0.3
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -22,7 +22,7 @@ Features:
 * Supports WooCommerce
 * Supports OptinMonster using /wp-json/sync-mautic/v1/optinmonster
 * Supports adding leads using /wp-json/sync-mautic/v1/add-lead
-* Adds [mautic] shortcode to give an email signup
+* Adds [mautic_form] shortcode to give an email signup
 * Adds a checkbox to WooCommerce checkout to subscribe to newsletter
 * Tag users of your website in Mautic
 * Tag customers of your store in Mautic
@@ -45,6 +45,10 @@ Features:
 
 
 == Changelog ==
+
+= 1.0.3 =
+* Added: Old rest routes for those previously on the beta
+* Updated: Handling for beta compatibility
 
 = 1.0.2 =
 * Bugfix: Empty tag added into Mautic when the shortcode's tag attribute was empty.
