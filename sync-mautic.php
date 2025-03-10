@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.4
+ * Version: 1.0.5
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -584,7 +584,7 @@ class Sync_Mautic
 				'/add-lead/',
 				array(
 					'methods' => 'POST',
-					'callback' => array($this, 'get_optionmonster_request'),
+					'callback' => array($this, 'get_optinmonster_request'),
 					'permission_callback' => '__return_true',
 				)
 			);
@@ -638,6 +638,8 @@ class Sync_Mautic
 			$email = $order->get_billing_email();
 			$tags  = array("WooCommerce");
 
+			$order->update_meta_data('checkout_mautic_signup', true);
+
 			$args = array(
 				'method' => 'POST',
 				'headers' => array(
@@ -676,7 +678,8 @@ class Sync_Mautic
 							self::debug('Added Lead #' . $id . ': ' . $email);
 						}
 					} else {
-						self::error('The response from Mautic was malformed');
+						self::error('The response from Mautic was malformed:');
+						self::error(print_r($response_data, true));
 					}
 				} else {
 					self::error('The response from Mautic was empty');
@@ -686,6 +689,8 @@ class Sync_Mautic
 
 				self::error($error_message);
 			}
+
+			$order->save();
 		}
 	}
 	
@@ -698,6 +703,10 @@ class Sync_Mautic
 	public function get_optinmonster_request(WP_REST_Request $request) {
 		$lead_data = $request->get_json_params();
 
+		if (!$lead_data) {
+			wp_send_json_error("No lead data found.", 400);
+		}
+
 		$this->optinmonster($lead_data);
 	}
 	
@@ -708,7 +717,11 @@ class Sync_Mautic
 	 * @return void
 	 */
 	private function optinmonster($lead_data) {
-		$email = $lead_data['lead']['email'] ? sanitize_email($lead_data['lead']['email']) : '';
+		$email = isset($lead_data['lead']['email']) ? sanitize_email($lead_data['lead']['email']) : '';
+
+		if (!$email) {
+			wp_send_json_error("Invalid email.", 400);
+		}
 
 		if ($email) {
 			$tags  = isset($lead_data['lead_options']['tags']) ? array_map('sanitize_text_field', $lead_data['lead_options']['tags']) : '';
@@ -736,8 +749,9 @@ class Sync_Mautic
 	 * @return void
 	 */
 	public function custom_form($lead_data) {
-		$email = isset($lead_data['email']) ? sanitize_email($lead_data['email']) : '';
-		$tags  = isset($lead_data['tag']) ? array(sanitize_text_field($lead_data['tag'])) : '';
+		$email    = isset($lead_data['email']) ? sanitize_email($lead_data['email']) : '';
+		$get_tags = isset($lead_data['tag']) ? sanitize_text_field($lead_data['tag']) : '';
+		$tags     = array_map('trim', explode(',', $get_tags));
 		
 		if (!$email) {
 			wp_send_json_error("You must enter a valid email.", 400);
@@ -1137,6 +1151,19 @@ class Sync_Mautic
       $sanitary_values['debug_mode'] = false;
     }
 
+		// Clear cache on save
+		delete_transient('dogbytemarketing_mautic_access_token');
+
+		
+		if (!$this->is_valid_token($sanitary_values)) {
+			add_settings_error(
+				'dogbytemarketing_sync_mautic',
+				'invalid_token_error',
+				'Failed to connect to Mautic, please check your Base URL, Client ID, and Client Secret.',
+				'error'
+			);
+		}
+
     return $sanitary_values;
   }
 
@@ -1193,10 +1220,10 @@ class Sync_Mautic
 
 					if ($body) {
 						if (isset($body['access_token']) && isset($body['expires_in'])) {
-							$access_token = $body['access_token'] ? sanitize_text_field($body['access_token']) : '';
-							$expires_in   = is_numeric($body['expires_in']) ? (int) ($body['expires_in']) : '';
+							$token      = $body['access_token'] ? sanitize_text_field($body['access_token']) : '';
+							$expires_in = is_numeric($body['expires_in']) ? (int) ($body['expires_in']) : '';
 
-							set_transient('dogbytemarketing_mautic_access_token', $access_token, $expires_in);
+							set_transient('dogbytemarketing_mautic_access_token', $token, $expires_in);
 						} else {
 							self::error('Access token or expiration not provided from "/oauth/v2/token" call.');
 						}
@@ -1214,6 +1241,21 @@ class Sync_Mautic
 		}
 
 		return $token;
+	}
+	
+	/**
+	 * Check if the token is valid
+	 *
+	 * @return bool $is_valid_token Is the token valid
+	 */
+	private function is_valid_token($settings) {
+		$this->base_url      = $settings['base_url'];
+		$this->client_id     = $settings['client_id'];
+		$this->client_secret = $settings['client_secret'];
+
+		$is_valid_token = is_string($this->get_token()) ? true : false;
+
+		return $is_valid_token;
 	}
 
 	/**

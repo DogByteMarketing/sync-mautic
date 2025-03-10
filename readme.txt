@@ -4,12 +4,12 @@ Donate link:
 Tags: sync, mautic, marketing, email, email marketing
 Requires at least: 6.5
 Tested up to: 6.7.1
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
-Syncs leads passed via webhooks along with syncing product, categories, and brands ordered via WooCommerce to Mautic.
+Bridge Mautic with WordPress and WooCommerce, automatically tagging contacts with their purchases, categories, and brands, while offering seamless lead collection through OptinMonster or custom forms.
 
 
 == Description ==
@@ -22,7 +22,7 @@ Features:
 * Supports WooCommerce
 * Supports OptinMonster using /wp-json/sync-mautic/v1/optinmonster
 * Supports adding leads using /wp-json/sync-mautic/v1/add-lead
-* Adds [mautic_form] shortcode to give an email signup
+* Adds [mautic_form] shortcode to give an email signup. You can use the tag attribute to add tags in Mautic [mautic_form tag="Tag 1, Tag 2"]
 * Adds a checkbox to WooCommerce checkout to subscribe to newsletter
 * Tag users of your website in Mautic
 * Tag customers of your store in Mautic
@@ -45,6 +45,14 @@ Features:
 
 
 == Changelog ==
+
+= 1.0.5 =
+* Added: Ability to add multiple tags using [mautic_form tag="Tag 1, Tag 2"] shortcode.
+* Added: API connection test when saving Sync Mautic settings, which will trigger an error if it fails to connect.
+* Added: Order meta to track if the customer signed up for the newsletter.
+* Added: Additional error logging.
+* Bugfix: After updating settings, it will pass the old token until cache expires. Saving settings will now clear the cache.
+* Bugfix: After the token expires, it fails to clear cache the first time it attempts to connect.
 
 = 1.0.4 =
 * Added: Additional debugging to checkout lead
