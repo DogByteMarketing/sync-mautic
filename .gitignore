@@ -6,7 +6,6 @@ node_modules/
 composer.lock
 package-lock.json
 webpack.config.js
-speedy-search.zip
 
 # Exclude test files
 tests/
