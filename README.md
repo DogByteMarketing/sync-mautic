@@ -18,6 +18,10 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 - Tag subscribed contacts with categories they have purchased from
 - Tag subscribed contacts with brands they have purchased from
 
+## Roadmap
+
+- Add translations
+
 ## Installation
 
 1. Backup your WordPress site.
