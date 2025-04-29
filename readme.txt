@@ -2,7 +2,7 @@
 Contributors: dogbytemarketing, polyplugins
 Tags: sync, mautic, marketing, email, email marketing
 Tested up to: 6.8
-Stable tag: 1.0.5
+Stable tag: 1.0.6
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -43,6 +43,9 @@ Features:
 
 
 == Changelog ==
+
+= 1.0.6 =
+* Updated: Shortcode to be able to use tag or tags.
 
 = 1.0.5 =
 * Added: Ability to add multiple tags using [mautic_form tag="Tag 1, Tag 2"] shortcode.

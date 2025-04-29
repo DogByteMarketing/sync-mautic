@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.5
+ * Version: 1.0.6
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -809,12 +809,17 @@ class Sync_Mautic
 		$atts = shortcode_atts(
 			array(
 				'tag'         => '',
+				'tags'        => '',
 				'template'    => 'stacked',
 				'placeholder' => 'Enter your email here...',
 			),
 			$atts,
 			'mautic_form'
 		);
+
+		if ($atts['tags']) {
+			$atts['tag'] = $atts['tags'];
+		}
 
 		ob_start();
 		

@@ -34,6 +34,9 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 
 ## Changelog
 
+### 1.0.6
+- Updated: Shortcode to be able to use tag or tags.
+
 ### 1.0.5
 - Added: Ability to add multiple tags using [mautic_form tag="Tag 1, Tag 2"] shortcode.
 - Added: API connection test when saving Sync Mautic settings, which will trigger an error if it fails to connect.
