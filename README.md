@@ -34,6 +34,9 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 
 ## Changelog
 
+### 1.0.7
+- Updated: Documentation in the settings panel for configuring the Mautic API
+
 ### 1.0.6
 - Updated: Shortcode to be able to use tag or tags.
 

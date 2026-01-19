@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.6
+ * Version: 1.0.7
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -902,8 +902,15 @@ class Sync_Mautic
 		);
 
 		add_settings_section(
+			'dogbytemarketing_sync_mautic_api_section',
+			__('API Configuration', 'sync-mautic'),
+			array($this, 'api_howto_render'),
+			'dogbytemarketing_sync_mautic'
+		);
+
+		add_settings_section(
 			'dogbytemarketing_sync_mautic_section',
-			'',
+			__('Other Configuration', 'sync-mautic'),
 			'',
 			'dogbytemarketing_sync_mautic'
 		);
@@ -913,7 +920,7 @@ class Sync_Mautic
 			__('Mautic Base URL', 'sync-mautic'),
 			array($this, 'base_url_render'),
 			'dogbytemarketing_sync_mautic',
-			'dogbytemarketing_sync_mautic_section'
+			'dogbytemarketing_sync_mautic_api_section'
 		);
 
 		add_settings_field(
@@ -921,7 +928,7 @@ class Sync_Mautic
 			__('Client ID', 'sync-mautic'),
 			array($this, 'client_id_render'),
 			'dogbytemarketing_sync_mautic',
-			'dogbytemarketing_sync_mautic_section'
+			'dogbytemarketing_sync_mautic_api_section'
 		);
 
 		add_settings_field(
@@ -929,7 +936,7 @@ class Sync_Mautic
 			__('Client Secret', 'sync-mautic'),
 			array($this, 'client_secret_render'),
 			'dogbytemarketing_sync_mautic',
-			'dogbytemarketing_sync_mautic_section'
+			'dogbytemarketing_sync_mautic_api_section'
 		);
 
 		if (class_exists('WooCommerce')) {
@@ -979,6 +986,13 @@ class Sync_Mautic
 		Example: https://mautic.domain.com</p>
 	<?php
 	}
+
+	
+	public function api_howto_render() {
+		echo '<div class="notice inline" style="margin-left: 0; background-color: orange; color: #fff; border-color: orange;">';
+		echo '<p>When you setup API creditials in Mautic your Redirect URI will be ' . untrailingslashit(home_url());
+		echo '</div>';
+	}
 	
 	/**
 	 * Render API Key Field
@@ -988,7 +1002,7 @@ class Sync_Mautic
 	public function client_id_render() {
 	?>
 		<input type='text' name='dogbytemarketing_sync_mautic_settings[client_id]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_id); ?>' style="width: 400px;">
-		<p>The Client ID or Public Key from Mautic Settings -> API Creditials.</p>
+		<p>The Public Key or Client ID from Mautic Settings -> Integrations -> API Credentials. Older Mautic versions are under Settings -> API Creditials.</p>
 	<?php
 	}
 	
@@ -1000,7 +1014,7 @@ class Sync_Mautic
 	public function client_secret_render() {
 	?>
 		<input type='password' name='dogbytemarketing_sync_mautic_settings[client_secret]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_secret); ?>' style="width: 400px;">
-		<p>The Client Secret or Secret Key from Mautic Settings -> API Creditials.</p>
+		<p>The Secret Key or Client Secret from Mautic Settings -> API Creditials. Older Mautic versions are under Settings -> API Creditials.</p>
 	<?php
 	}
 	
@@ -1075,7 +1089,7 @@ class Sync_Mautic
 	public function options_page() {
 	?>
 		<form action='options.php' method='post'>
-			<h2>Sync Mautic Settings</h2>
+			<h1>Sync Mautic Settings</h1>
 
 			<?php
 			settings_fields('dogbytemarketing_sync_mautic');
