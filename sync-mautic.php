@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.7
+ * Version: 1.0.8
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -76,6 +76,15 @@ class Sync_Mautic
 	private $checkout_optin;
 
 	/**
+	 * WooCommerce Order Tracking
+	 *
+	 * @since    1.0.8
+	 * @access   private
+	 * @var      bool      $order_tracking      Enable WooCommerce Order Tracking
+	 */
+	private $order_tracking;
+
+	/**
 	 * Store admin notices
 	 *
 	 * @since    1.0.0
@@ -95,6 +104,7 @@ class Sync_Mautic
 		$this->client_id      = isset($this->settings['client_id']) ? $this->settings['client_id'] : '';
 		$this->client_secret  = isset($this->settings['client_secret']) ? $this->settings['client_secret'] : '';
 		$this->checkout_optin = isset($this->settings['checkout_optin']) ? $this->settings['checkout_optin'] : 'disabled';
+		$this->order_tracking = isset($this->settings['order_tracking']) ? (bool) $this->settings['order_tracking'] : false;
 	}
 	
 	/**
@@ -103,12 +113,22 @@ class Sync_Mautic
 	 * @return void
 	 */
 	public function init() {
+		self::debug('Init');
+
 		if ($this->base_url && $this->client_id && $this->client_secret) {
 			add_action('rest_api_init', array($this, 'add_endpoints'));
 			add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
 			
 			// WooCommerce
 			add_action('woocommerce_order_status_completed', array($this, 'order_tagging'));
+			
+			// Add WooCommerce order tracking to WP Mautic frontend tracking
+			
+			if ($this->order_tracking) {
+				self::debug('Start Order Tracking');
+
+				add_filter('wpmautic_tracking_attributes', array($this, 'add_order_tracking_attributes'));
+			}
 
 			if ($this->checkout_optin !== 'disabled') {
 				add_action('woocommerce_review_order_before_submit', array($this, 'add_checkout_optin'));
@@ -378,6 +398,43 @@ class Sync_Mautic
 		} else {
 			self::debug('Unable to get lead id for order #' . $order_id . '. '. $email . ' may not be subscribed.');
 		}
+	}
+	
+	/**
+	 * Add WooCommerce order tracking attributes to WP Mautic frontend tracking
+	 *
+	 * @param  array $attrs Existing tracking attributes
+	 * @return array $attrs Modified tracking attributes with order data
+	 */
+	public function add_order_tracking_attributes($attrs) {
+		self::debug('Order Tracking Initializing');
+
+		if (!function_exists('is_order_received_page') || !function_exists('wc_get_order')) {
+			self::debug('Order Tracking Not Initialized');
+
+			return $attrs;
+		}
+
+		if (is_order_received_page() && isset($_GET['key'])) {
+			self::debug('Order Tracking Initialized');
+
+			$order_id = (int) get_query_var('order-received');
+
+			if ($order_id > 0) {
+				$order = wc_get_order($order_id);
+
+				if ($order && $order->get_order_key() === $_GET['key']) {
+					$attrs['order_id']       = $order->get_order_number();
+					$attrs['order_total']    = $order->get_total();
+					$attrs['order_currency'] = $order->get_currency();
+					$attrs['order_source']   = 'woocommerce';
+
+					self::debug('Added order tracking attributes for order #' . $order_id);
+				}
+			}
+		}
+
+		return $attrs;
 	}
 	
 	/**
@@ -948,21 +1005,29 @@ class Sync_Mautic
 				'dogbytemarketing_sync_mautic_section'
 			);
 
-			add_settings_field(
-				'checkout_optin',
-				__('Checkout Optin', 'sync-mautic'),
-				array($this, 'checkout_optin_render'),
-				'dogbytemarketing_sync_mautic',
-				'dogbytemarketing_sync_mautic_section'
-			);
+		add_settings_field(
+			'checkout_optin',
+			__('Checkout Optin', 'sync-mautic'),
+			array($this, 'checkout_optin_render'),
+			'dogbytemarketing_sync_mautic',
+			'dogbytemarketing_sync_mautic_section'
+		);
 
-			add_settings_field(
-				'resync_past_orders',
-				__('Resync Past Orders', 'sync-mautic'),
-				array($this, 'resync_past_orders_render'),
-				'dogbytemarketing_sync_mautic',
-				'dogbytemarketing_sync_mautic_section'
-			);
+		add_settings_field(
+			'order_tracking',
+			__('WooCommerce Order Tracking', 'sync-mautic'),
+			array($this, 'order_tracking_render'),
+			'dogbytemarketing_sync_mautic',
+			'dogbytemarketing_sync_mautic_section'
+		);
+
+		add_settings_field(
+			'resync_past_orders',
+			__('Resync Past Orders', 'sync-mautic'),
+			array($this, 'resync_past_orders_render'),
+			'dogbytemarketing_sync_mautic',
+			'dogbytemarketing_sync_mautic_section'
+		);
 
 			add_settings_field(
 				'debug_mode',
@@ -990,7 +1055,7 @@ class Sync_Mautic
 	
 	public function api_howto_render() {
 		echo '<div class="notice inline" style="margin-left: 0; background-color: orange; color: #fff; border-color: orange;">';
-		echo '<p>When you setup API creditials in Mautic your Redirect URI will be ' . untrailingslashit(home_url());
+		echo '<p>When you setup API creditials in Mautic your Redirect URI will be ' . esc_url(untrailingslashit(home_url()));
 		echo '</div>';
 	}
 	
@@ -1057,6 +1122,21 @@ class Sync_Mautic
 	}
 	
 	/**
+	 * Render WooCommerce Order Tracking Field
+	 *
+	 * @return void
+	 */
+	public function order_tracking_render() {
+		$order_tracking = isset($this->settings['order_tracking']) ? $this->settings['order_tracking'] : false;
+	?>
+		<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tracking]" id="order_tracking" <?php checked(1, $order_tracking, true); ?> /> Enable
+		<p>Track WooCommerce revenue related to emails via WP Mautic frontend.<br />
+		Requires <a href="https://github.com/mautic/mautic/releases/tag/7.0.0" target="_blank">Mautic 7</a> with our <a href="https://www.dogbytemarketing.com/shop/ecommerce-connector/" target="_blank">eCommerce Connector</a>, and the official <a href="https://wordpress.org/plugins/wp-mautic/" target="_blank">WP Mautic</a> plugin to be installed and enabled.<br/>
+		<strong>Make sure you are in compliance with data protection regulations before enabling this option.</strong></p>
+	<?php
+	}
+	
+	/**
 	 * Resync Past Orders Field
 	 *
 	 * @return void
@@ -1113,46 +1193,46 @@ class Sync_Mautic
    * @return array $sanitary_values Array of sanitized options
    */
   public function sanitize($input) {
-		$sanitary_values = array();
-    
-		if (isset($input['client_id']) && $input['client_id']) {
-			$sanitary_values['client_id'] = sanitize_text_field($input['client_id']);
-		}
-    
-		if (isset($input['client_secret']) && $input['client_secret']) {
-			$sanitary_values['client_secret'] = sanitize_text_field($input['client_secret']);
-		}
-    
-		if (isset($input['base_url']) && $input['base_url']) {
-			if (filter_var($input['base_url'], FILTER_VALIDATE_URL)) {
-				$sanitary_values['base_url'] = esc_url_raw($input['base_url']);
-			} else {
-				add_settings_error('base_url', 'base_url', "Invalid URL");
-				
-				// Revert back to old base url
-				$sanitary_values['base_url'] = isset($this->settings['base_url']) ? $this->settings['base_url'] : '';
-			}
-		}
-    
-		if (isset($input['checkout_optin']) && $input['checkout_optin']) {
-			$sanitary_values['checkout_optin'] = sanitize_text_field($input['checkout_optin']);
-		} else {
-			$sanitary_values['checkout_optin'] = 'disabled';
-		}
-    
-		if (isset($input['order_tagging']) && $input['order_tagging']) {
-			$sanitary_values['order_tagging'] = array_map('sanitize_text_field', $input['order_tagging']);
-		} else {
-			$sanitary_values['order_tagging'] = array();
-		}
+	$sanitary_values = array();
 
-		if ($sanitary_values['order_tagging']) {
-			if (!get_option('dogbytemarketing_sync_mautic_past_orders_complete')) {
-				if (!wp_next_scheduled('dogbytemarketing_sync_mautic_past_orders')) {
-					wp_schedule_event(time(), 'every_minute', 'dogbytemarketing_sync_mautic_past_orders');
-				}
+	if (isset($input['client_id']) && $input['client_id']) {
+		$sanitary_values['client_id'] = sanitize_text_field($input['client_id']);
+	}
+
+	if (isset($input['client_secret']) && $input['client_secret']) {
+		$sanitary_values['client_secret'] = sanitize_text_field($input['client_secret']);
+	}
+
+	if (isset($input['base_url']) && $input['base_url']) {
+		if (filter_var($input['base_url'], FILTER_VALIDATE_URL)) {
+			$sanitary_values['base_url'] = esc_url_raw($input['base_url']);
+		} else {
+			add_settings_error('base_url', 'base_url', "Invalid URL");
+			
+			// Revert back to old base url
+			$sanitary_values['base_url'] = isset($this->settings['base_url']) ? $this->settings['base_url'] : '';
+		}
+	}
+
+	if (isset($input['checkout_optin']) && $input['checkout_optin']) {
+		$sanitary_values['checkout_optin'] = sanitize_text_field($input['checkout_optin']);
+	} else {
+		$sanitary_values['checkout_optin'] = 'disabled';
+	}
+
+	if (isset($input['order_tagging']) && $input['order_tagging']) {
+		$sanitary_values['order_tagging'] = array_map('sanitize_text_field', $input['order_tagging']);
+	} else {
+		$sanitary_values['order_tagging'] = array();
+	}
+
+	if ($sanitary_values['order_tagging']) {
+		if (!get_option('dogbytemarketing_sync_mautic_past_orders_complete')) {
+			if (!wp_next_scheduled('dogbytemarketing_sync_mautic_past_orders')) {
+				wp_schedule_event(time(), 'every_minute', 'dogbytemarketing_sync_mautic_past_orders');
 			}
 		}
+	}
 
     if (isset($input['resync_past_orders']) && $input['resync_past_orders']) {
       if ($input['resync_past_orders'] === 'on') {
@@ -1164,24 +1244,30 @@ class Sync_Mautic
       }
     }
 
+	if (isset($input['order_tracking']) && $input['order_tracking']) {
+      $sanitary_values['order_tracking'] = $input['order_tracking'] === 'on' ? true : false;
+    } else {
+      $sanitary_values['order_tracking'] = false;
+    }
+
 		if (isset($input['debug_mode']) && $input['debug_mode']) {
       $sanitary_values['debug_mode'] = $input['debug_mode'] === 'on' ? true : false;
     } else {
       $sanitary_values['debug_mode'] = false;
     }
 
-		// Clear cache on save
-		delete_transient('dogbytemarketing_mautic_access_token');
+	// Clear cache on save
+	delete_transient('dogbytemarketing_mautic_access_token');
 
-		
-		if (!$this->is_valid_token($sanitary_values)) {
-			add_settings_error(
-				'dogbytemarketing_sync_mautic',
-				'invalid_token_error',
-				'Failed to connect to Mautic, please check your Base URL, Client ID, and Client Secret.',
-				'error'
-			);
-		}
+	
+	if (!$this->is_valid_token($sanitary_values)) {
+		add_settings_error(
+			'dogbytemarketing_sync_mautic',
+			'invalid_token_error',
+			'Failed to connect to Mautic, please check your Base URL, Client ID, and Client Secret.',
+			'error'
+		);
+	}
 
     return $sanitary_values;
   }
@@ -1312,26 +1398,42 @@ class Sync_Mautic
 
 		return $has_used_beta;
 	}
-	
+
 	/**
-	 * WooCommerce logging
+	 * Logging
 	 *
-	 * @param  mixed  $log
-	 * @param  string $type
-	 * @param  string $context
+	 * @param mixed  $log
+	 * @param string $type
 	 * @return void
 	 */
-	private static function log($log, $type = 'debug', $context = 'sync-mautic') {
-		if (class_exists('WooCommerce')) {
-			$logger         = wc_get_logger();
-			$logger_context = array('source' => $context);
+	private static function log($log, $type = 'debug') {
+		$log_dir = self::setup_log_directory();
 
-			$logger->$type($log, $logger_context);
+		// Sanitize type for filename safety
+		$type = sanitize_key($type);
+
+		$log_file = $log_dir . 'debug.log';
+
+		// Normalize message
+		if (is_array($log) || is_object($log)) {
+			$log = print_r($log, true);
 		}
+
+		// ISO-8601 timestamp with timezone
+		$timestamp = gmdate('c');
+
+		$entry = sprintf(
+			'[%s] %s: %s' . PHP_EOL,
+			$timestamp,
+			ucfirst($type),
+			$log
+		);
+
+		file_put_contents($log_file, $entry, FILE_APPEND | LOCK_EX);
 	}
 	
 	/**
-	 * WooCommerce debug logging
+	 * Debug logging
 	 *
 	 * @param  mixed  $log
 	 * @param  string $context
@@ -1348,7 +1450,7 @@ class Sync_Mautic
 	}
 	
 	/**
-	 * WooCommerce error logging
+	 * Error logging
 	 *
 	 * @param  mixed  $log
 	 * @param  string $context
@@ -1357,6 +1459,37 @@ class Sync_Mautic
 	private static function error($log, $context = 'sync-mautic') {
 		self::log($log, 'error', $context);
 	}
+
+	/**
+	 * Ensure log directory and security files exist
+	 *
+	 * @return string Absolute log directory path
+	 */
+	private static function setup_log_directory() {
+		$upload_dir = wp_upload_dir();
+		$log_dir    = trailingslashit($upload_dir['basedir']) . 'sync-mautic-logs/';
+
+		// Create directory if needed
+		if (!file_exists($log_dir)) {
+			wp_mkdir_p($log_dir);
+		}
+
+		// .htaccess (deny all)
+		$htaccess_file = $log_dir . '.htaccess';
+
+		if (!file_exists($htaccess_file)) {
+			file_put_contents($htaccess_file, "Deny from all\n");
+		}
+
+		// index.php (silence is golden)
+		$index_file = $log_dir . 'index.php';
+		if (!file_exists($index_file)) {
+			file_put_contents($index_file, "<?php\n// Silence is golden.\n");
+		}
+
+		return $log_dir;
+	}
+
 }
 
 $sync_mautic = new Sync_Mautic;

@@ -8,6 +8,7 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 
 - Supports WordPress
 - Supports WooCommerce
+- [NEW] Supports tracking eCommerce revenue using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)
 - Supports OptinMonster using /wp-json/sync-mautic/v1/optinmonster
 - Supports adding leads using /wp-json/sync-mautic/v1/add-lead
 - Adds [mautic_form] shortcode to give an email signup. You can use the tag attribute to add tags in Mautic [mautic_form tag="Tag 1, Tag 2"]
@@ -33,6 +34,10 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 ![Plugin Settings](.wordpress-org/screenshot-1.jpg)
 
 ## Changelog
+
+### 1.0.8
+- Added: eCommerce tracking support to Mautic 7 using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)
+- Updated: Logging to use filesystem instead of depending on WooCommerce
 
 ### 1.0.7
 - Updated: Documentation in the settings panel for configuring the Mautic API

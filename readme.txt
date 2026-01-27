@@ -1,8 +1,8 @@
 === Sync Mautic ===
 Contributors: dogbytemarketing, polyplugins
 Tags: sync, mautic, marketing, email, email marketing
-Tested up to: 6.8
-Stable tag: 1.0.7
+Tested up to: 6.9
+Stable tag: 1.0.8
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -18,6 +18,7 @@ Features:
 
 * Supports WordPress
 * Supports WooCommerce
+* [NEW] Supports tracking eCommerce revenue using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)
 * Supports OptinMonster using /wp-json/sync-mautic/v1/optinmonster
 * Supports adding leads using /wp-json/sync-mautic/v1/add-lead
 * Adds [mautic_form] shortcode to give an email signup. You can use the tag attribute to add tags in Mautic [mautic_form tag="Tag 1, Tag 2"]
@@ -43,6 +44,10 @@ Features:
 
 
 == Changelog ==
+
+= 1.0.8 =
+* Added: eCommerce tracking support to Mautic 7 using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)
+* Updated: Logging to use filesystem instead of depending on WooCommerce
 
 = 1.0.7 =
 * Updated: Documentation in the settings panel for configuring the Mautic API
