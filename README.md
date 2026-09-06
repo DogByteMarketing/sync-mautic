@@ -28,10 +28,18 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 
 ## Installation
 
-1. Backup your WordPress site.
+1. Take a backup of your WordPress database and files before you install. A backup lets you restore WordPress if something goes wrong.
 2. Upload the plugin files to the `/wp-content/plugins/` directory, or install the plugin through the WordPress plugins screen directly.
 3. Activate the plugin through the 'Plugins' screen in WordPress.
 4. Use the Settings > Sync Mautic page to configure the plugin.
+5. In Mautic, open Ecommerce Connector → Validation and set **Allowed order sources** to `WooCommerce`. Sync Mautic sends `WooCommerce` as the order source.
+
+## Upgrade
+
+1. Take a backup of your WordPress database and files before you upgrade. A backup lets you restore WordPress if something goes wrong.
+2. Update Sync Mautic from the WordPress plugins screen, or replace the plugin files in `/wp-content/plugins/sync-mautic/`.
+3. Open Settings > Sync Mautic after the upgrade and confirm your tracking settings.
+4. In Mautic, open Ecommerce Connector → Validation and set **Allowed order sources** to `WooCommerce`. Sync Mautic sends `WooCommerce` as the order source.
 
 ## Screenshots
 
@@ -41,7 +49,7 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 
 This plugin may send contact, order, and revenue data to Mautic. That data may be personal data under the GDPR and similar privacy laws.
 
-Cookies are not the threshold. The signed webhook is server-to-server and does not set cookies, but it still processes personal data. Page-hit tracking uses WP Mautic visitor identification, which typically involves cookies. Optional clickthrough collection stores a first-party cookie so signed webhook orders can be attributed to a Mautic email.
+Cookies are not the threshold. The signed webhook is server-to-server and does not set cookies, but it still processes personal data. Page-hit tracking uses WP Mautic visitor identification, which typically involves cookies. Page hits also send billing email on the mtc.js pageview so the order can be linked to an existing Mautic contact. Page hits do not set an additional cookie. Optional clickthrough collection stores a first-party cookie so signed webhook orders can be attributed to a Mautic email.
 
 **Before you enable tracking, update your privacy and cookie policies along with cookie acceptance banners** so they disclose that order, purchase, and revenue information may be sent to and stored in Mautic for marketing analytics, email attribution, segmentation, and contact profiling. Do not rely on this plugin's settings alone; your public-facing privacy policy (and any other required notices) must reflect this processing.
 
@@ -58,7 +66,7 @@ When order tracking is enabled, this plugin may send to Mautic (via Ecommerce Co
 
 - Order identifiers, totals, currency, source, and order date
 - Line items (product/item ID, name, quantity, category), when enabled
-- Billing email on signed webhook requests, used only to link an existing Mautic contact (contacts are not created from the webhook)
+- Billing email on page-hit (mtc.js) pageviews and signed webhook requests, used only to link an existing Mautic contact (contacts are not created from page hits or the webhook)
 - Optional clickthrough token (`ct`) for email attribution, when Collect clickthrough is enabled
 - Links between orders and contacts, and optional attribution to Mautic emails
 
@@ -95,9 +103,6 @@ You are solely responsible for how you deploy and use this plugin, including com
 - Added: Page-hit line item cap of 20, with a note to use the signed webhook for larger carts.
 - Added: Settings copy that tracking does not backfill past orders.
 - Added: Optional collect clickthrough setting for signed webhook only (default off). Stores the Mautic ct token in a first-party cookie and sends it with the webhook for email attribution.
-- Added: Dismissible admin notice for the 1.1.0 tracking options and privacy reminder.
-- Added: GDPR and privacy section covering order, purchase, and revenue data sent to Mautic.
-- Added: Disclaimer section.
 
 ### 1.0.8
 - Added: eCommerce tracking support to Mautic 7 using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)

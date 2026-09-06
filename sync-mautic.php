@@ -505,7 +505,12 @@ class Sync_Mautic
 					$attrs['order_id']       = $order->get_order_number();
 					$attrs['order_total']    = $order->get_total();
 					$attrs['order_currency'] = $order->get_currency();
-					$attrs['order_source']   = 'woocommerce';
+					$attrs['order_source']   = 'WooCommerce';
+
+					$email = sanitize_email($order->get_billing_email());
+					if ($email) {
+						$attrs['email'] = $email;
+					}
 
 					if ($this->order_line_items) {
 						$items = $this->get_order_line_items($order, self::PAGE_HIT_LINE_ITEM_CAP);
@@ -865,7 +870,7 @@ class Sync_Mautic
 		$payload = array(
 			'order_id'       => $order->get_order_number(),
 			'order_total'    => $order->get_total(),
-			'order_source'   => 'woocommerce',
+			'order_source'   => 'WooCommerce',
 			'order_currency' => $order->get_currency(),
 		);
 
