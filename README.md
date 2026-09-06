@@ -8,7 +8,10 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 
 - Supports WordPress
 - Supports WooCommerce
-- [NEW] Supports tracking eCommerce revenue using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)
+- Supports tracking eCommerce revenue using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)
+- [NEW] Optional order line items (product ID, name, quantity, category) for eCommerce Connector 1.3.0
+- [NEW] Optional signed webhook order tracking as an alternative to page hits
+- [NEW] Optional clickthrough collection for signed webhook so orders can be attributed to the Mautic email that was clicked
 - Supports OptinMonster using /wp-json/sync-mautic/v1/optinmonster
 - Supports adding leads using /wp-json/sync-mautic/v1/add-lead
 - Adds [mautic_form] shortcode to give an email signup. You can use the tag attribute to add tags in Mautic [mautic_form tag="Tag 1, Tag 2"]
@@ -28,12 +31,73 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 1. Backup your WordPress site.
 2. Upload the plugin files to the `/wp-content/plugins/` directory, or install the plugin through the WordPress plugins screen directly.
 3. Activate the plugin through the 'Plugins' screen in WordPress.
+4. Use the Settings > Sync Mautic page to configure the plugin.
 
 ## Screenshots
 
 ![Plugin Settings](.wordpress-org/screenshot-1.jpg)
 
+## GDPR and privacy
+
+This plugin may send contact, order, and revenue data to Mautic. That data may be personal data under the GDPR and similar privacy laws.
+
+Cookies are not the threshold. The signed webhook is server-to-server and does not set cookies, but it still processes personal data. Page-hit tracking uses WP Mautic visitor identification, which typically involves cookies. Optional clickthrough collection stores a first-party cookie so signed webhook orders can be attributed to a Mautic email.
+
+**Before you enable tracking, update your privacy and cookie policies along with cookie acceptance banners** so they disclose that order, purchase, and revenue information may be sent to and stored in Mautic for marketing analytics, email attribution, segmentation, and contact profiling. Do not rely on this plugin's settings alone; your public-facing privacy policy (and any other required notices) must reflect this processing.
+
+You are also responsible for:
+
+- Having a lawful basis for processing (for example consent or legitimate interests, as applicable in your jurisdiction)
+- Obtaining consent where required before enabling order tracking, clickthrough collection, or checkout opt-in
+- Handling data subject requests (access, erasure, and related rights) for data stored in WordPress and in Mautic
+- Configuring retention and security in line with your policies and legal obligations
+
+### Data this plugin may send or store
+
+When order tracking is enabled, this plugin may send to Mautic (via Ecommerce Connector):
+
+- Order identifiers, totals, currency, source, and order date
+- Line items (product/item ID, name, quantity, category), when enabled
+- Billing email on signed webhook requests, used only to link an existing Mautic contact (contacts are not created from the webhook)
+- Optional clickthrough token (`ct`) for email attribution, when Collect clickthrough is enabled
+- Links between orders and contacts, and optional attribution to Mautic emails
+
+Mautic may then store and display contact commerce fields, timeline entries, and report data derived from those orders.
+
+This plugin may also store in WordPress:
+
+- Cached Mautic lead IDs on WordPress user profiles when order tagging is enabled
+- A first-party clickthrough cookie and matching order meta when Collect clickthrough is enabled
+- Checkout newsletter signup meta when checkout opt-in is used
+
+Order tagging and checkout opt-in may create or update Mautic contacts and tags. Past order tagging does not send historical orders to Ecommerce Connector.
+
+### Access and erasure
+
+- **Contact export** of ecommerce order history (order ID, totals, currency, source, location, date, attributed email, and line items) is handled in Mautic by Ecommerce Connector, so you can fulfill access requests there.
+- **Deleting a Mautic contact** also deletes that contact's ecommerce orders and line items in Mautic. Commerce fields on the contact are removed with the contact. Email revenue totals for those orders will drop after deletion.
+- Merging Mautic contacts moves ecommerce orders to the remaining contact.
+- Deleting a WordPress user does not automatically delete the matching Mautic contact or that contact's ecommerce orders.
+
+You are solely responsible for any data protection measures required for your use of this integration.
+
+## Disclaimer
+
+This software is provided **as is**, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability arising from use of this software.
+
+You are solely responsible for how you deploy and use this plugin, including compliance with applicable laws and data protection obligations.
+
 ## Changelog
+
+### 1.1.0
+- Added: Optional line items on WooCommerce order tracking (product ID, name, quantity, first category). Requires eCommerce Connector 1.3.0. Defaults to off.
+- Added: Signed webhook tracking method as an exclusive alternative to page hits. Requires eCommerce Connector 1.3.0 and the Ecommerce Connector webhook secret.
+- Added: Page-hit line item cap of 20, with a note to use the signed webhook for larger carts.
+- Added: Settings copy that tracking does not backfill past orders.
+- Added: Optional collect clickthrough setting for signed webhook only (default off). Stores the Mautic ct token in a first-party cookie and sends it with the webhook for email attribution.
+- Added: Dismissible admin notice for the 1.1.0 tracking options and privacy reminder.
+- Added: GDPR and privacy section covering order, purchase, and revenue data sent to Mautic.
+- Added: Disclaimer section.
 
 ### 1.0.8
 - Added: eCommerce tracking support to Mautic 7 using our [eCommerce Connector for Mautic](https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/)

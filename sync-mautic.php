@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.0.8
+ * Version: 1.1.0
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -29,6 +29,24 @@ register_deactivation_hook(__FILE__, array(__NAMESPACE__ . '\Sync_Mautic', 'deac
 
 class Sync_Mautic
 {
+
+	const VERSION = '1.1.0';
+
+	const PAGE_HIT_LINE_ITEM_CAP = 20;
+
+	const WEBHOOK_TIMEOUT = 5;
+
+	const META_WEBHOOK_QUEUED = '_mautic_ecommerce_order_queued';
+
+	const META_WEBHOOK_SENT = '_mautic_ecommerce_order_sent';
+
+	const META_CLICKTHROUGH = '_mautic_clickthrough';
+
+	const CLICKTHROUGH_COOKIE = 'sync_mautic_ct';
+
+	const CLICKTHROUGH_COOKIE_TTL = 2592000;
+
+	const CLICKTHROUGH_MAX_LENGTH = 4096;
 
 	/**
 	 * Sync Mautic Settings
@@ -85,6 +103,42 @@ class Sync_Mautic
 	private $order_tracking;
 
 	/**
+	 * WooCommerce order tracking method
+	 *
+	 * @since    1.1.0
+	 * @access   private
+	 * @var      string    $order_tracking_method    page_hits or webhook
+	 */
+	private $order_tracking_method;
+
+	/**
+	 * Send order line items to Ecommerce Connector
+	 *
+	 * @since    1.1.0
+	 * @access   private
+	 * @var      bool      $order_line_items         Enable line item tracking
+	 */
+	private $order_line_items;
+
+	/**
+	 * Ecommerce Connector webhook secret
+	 *
+	 * @since    1.1.0
+	 * @access   private
+	 * @var      string    $webhook_secret           HMAC webhook secret
+	 */
+	private $webhook_secret;
+
+	/**
+	 * Collect Mautic clickthrough tokens for email attribution
+	 *
+	 * @since    1.1.0
+	 * @access   private
+	 * @var      bool      $collect_clickthrough     Store ct for order attribution
+	 */
+	private $collect_clickthrough;
+
+	/**
 	 * Store admin notices
 	 *
 	 * @since    1.0.0
@@ -99,12 +153,21 @@ class Sync_Mautic
 	 * @return void
 	 */
 	public function __construct() {
-		$this->settings       = get_option('dogbytemarketing_sync_mautic_settings');
+		$settings = get_option('dogbytemarketing_sync_mautic_settings');
+		$this->settings = is_array($settings) ? $settings : array();
 		$this->base_url       = isset($this->settings['base_url']) ? $this->settings['base_url'] : '';
 		$this->client_id      = isset($this->settings['client_id']) ? $this->settings['client_id'] : '';
 		$this->client_secret  = isset($this->settings['client_secret']) ? $this->settings['client_secret'] : '';
-		$this->checkout_optin = isset($this->settings['checkout_optin']) ? $this->settings['checkout_optin'] : 'disabled';
-		$this->order_tracking = isset($this->settings['order_tracking']) ? (bool) $this->settings['order_tracking'] : false;
+		$this->checkout_optin          = isset($this->settings['checkout_optin']) ? $this->settings['checkout_optin'] : 'disabled';
+		$this->order_tracking          = isset($this->settings['order_tracking']) ? (bool) $this->settings['order_tracking'] : false;
+		$this->order_tracking_method   = isset($this->settings['order_tracking_method']) ? $this->settings['order_tracking_method'] : 'page_hits';
+		$this->order_line_items        = isset($this->settings['order_line_items']) ? (bool) $this->settings['order_line_items'] : false;
+		$this->webhook_secret          = isset($this->settings['webhook_secret']) ? $this->settings['webhook_secret'] : '';
+		$this->collect_clickthrough    = isset($this->settings['collect_clickthrough']) ? (bool) $this->settings['collect_clickthrough'] : false;
+
+		if ($this->order_tracking_method !== 'webhook') {
+			$this->order_tracking_method = 'page_hits';
+		}
 	}
 	
 	/**
@@ -127,7 +190,17 @@ class Sync_Mautic
 			if ($this->order_tracking) {
 				self::debug('Start Order Tracking');
 
-				add_filter('wpmautic_tracking_attributes', array($this, 'add_order_tracking_attributes'));
+				if ($this->order_tracking_method === 'webhook') {
+					add_action('woocommerce_order_status_completed', array($this, 'queue_ecommerce_order_webhook'));
+
+					if ($this->collect_clickthrough) {
+						add_action('send_headers', array($this, 'capture_clickthrough'));
+						add_action('woocommerce_checkout_order_processed', array($this, 'store_clickthrough_on_order'));
+						add_action('woocommerce_store_api_checkout_order_processed', array($this, 'store_clickthrough_on_store_api_order'));
+					}
+				} else {
+					add_filter('wpmautic_tracking_attributes', array($this, 'add_order_tracking_attributes'));
+				}
 			}
 
 			if ($this->checkout_optin !== 'disabled') {
@@ -161,9 +234,13 @@ class Sync_Mautic
 		}
 
 		add_action('dogbytemarketing_sync_mautic_past_orders', array($this, 'sync_mautic_past_orders'));
+		add_action('dogbytemarketing_sync_mautic_send_ecommerce_order', array($this, 'send_ecommerce_order_webhook'));
+		add_action('admin_post_dogbytemarketing_dismiss_sync_mautic_1_1_0', array($this, 'dismiss_1_1_0_notice'));
 		add_filter('cron_schedules', array($this, 'mautic_schedule'));
 		add_action('admin_menu', array($this, 'add_admin_menu'));
+		add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
 		add_action('admin_init', array($this, 'settings_init'));
+		add_action('admin_init', array($this, 'maybe_show_1_1_0_notice'));
 	}
 	
 	/**
@@ -418,16 +495,24 @@ class Sync_Mautic
 		if (is_order_received_page() && isset($_GET['key'])) {
 			self::debug('Order Tracking Initialized');
 
-			$order_id = (int) get_query_var('order-received');
+			$order_id  = (int) get_query_var('order-received');
+			$order_key = sanitize_text_field(wp_unslash($_GET['key']));
 
-			if ($order_id > 0) {
+			if ($order_id > 0 && $order_key !== '') {
 				$order = wc_get_order($order_id);
 
-				if ($order && $order->get_order_key() === $_GET['key']) {
+				if ($order && hash_equals($order->get_order_key(), $order_key)) {
 					$attrs['order_id']       = $order->get_order_number();
 					$attrs['order_total']    = $order->get_total();
 					$attrs['order_currency'] = $order->get_currency();
 					$attrs['order_source']   = 'woocommerce';
+
+					if ($this->order_line_items) {
+						$items = $this->get_order_line_items($order, self::PAGE_HIT_LINE_ITEM_CAP);
+						if ($items) {
+							$attrs['items'] = wp_json_encode($items);
+						}
+					}
 
 					self::debug('Added order tracking attributes for order #' . $order_id);
 				}
@@ -608,6 +693,415 @@ class Sync_Mautic
 
 		return $product_names;
 	}
+
+	/**
+	 * Build Ecommerce Connector line items from a WooCommerce order.
+	 *
+	 * @param  \WC_Order $order
+	 * @param  int       $limit  Max items to include. 0 means no cap.
+	 * @return array
+	 */
+	private function get_order_line_items($order, $limit = 0) {
+		$items = array();
+
+		if (!$order) {
+			return $items;
+		}
+
+		foreach ($order->get_items() as $item) {
+			if ($limit > 0 && count($items) >= $limit) {
+				break;
+			}
+
+			$qty = (int) $item->get_quantity();
+
+			if ($qty < 1) {
+				continue;
+			}
+
+			$product = $item->get_product();
+
+			if (!$product) {
+				continue;
+			}
+
+			$item_id   = (string) $product->get_id();
+			$item_name = $item->get_name();
+
+			if ($item_id === '' || $item_name === '') {
+				continue;
+			}
+
+			$line = array(
+				'item_id'   => $item_id,
+				'item_name' => $item_name,
+				'qty'       => $qty,
+			);
+
+			$category = $this->get_product_first_category($product);
+
+			if ($category) {
+				$line['category'] = $category;
+			}
+
+			$items[] = $line;
+		}
+
+		return $items;
+	}
+
+	/**
+	 * Get the first product category name. Variations use the parent product.
+	 *
+	 * @param  \WC_Product $product
+	 * @return string
+	 */
+	private function get_product_first_category($product) {
+		$product_id = $product->get_id();
+
+		if ($product->is_type('variation')) {
+			$product_id = $product->get_parent_id();
+		}
+
+		if (!$product_id) {
+			return '';
+		}
+
+		$terms = get_the_terms($product_id, 'product_cat');
+
+		if (is_wp_error($terms) || empty($terms)) {
+			return '';
+		}
+
+		$first = reset($terms);
+
+		return ($first && isset($first->name)) ? $first->name : '';
+	}
+
+	/**
+	 * Queue a signed ecommerce webhook when an order is completed.
+	 *
+	 * @param  int $order_id
+	 * @return void
+	 */
+	public function queue_ecommerce_order_webhook($order_id) {
+		$order_id = (int) $order_id;
+
+		if ($order_id < 1) {
+			return;
+		}
+
+		if (!function_exists('wc_get_order')) {
+			return;
+		}
+
+		if (!$this->order_tracking || $this->order_tracking_method !== 'webhook') {
+			return;
+		}
+
+		if (!$this->webhook_secret) {
+			self::error('Skipped ecommerce webhook for order #' . $order_id . ' because the webhook secret is not configured.');
+			return;
+		}
+
+		$order = wc_get_order($order_id);
+
+		if (!$order) {
+			self::error('Failed to queue ecommerce webhook for order #' . $order_id . ' - Unable to retrieve order.');
+			return;
+		}
+
+		if ($order->get_meta(self::META_WEBHOOK_SENT, true) || $order->get_meta(self::META_WEBHOOK_QUEUED, true)) {
+			self::debug('Ecommerce webhook already queued or sent for order #' . $order_id);
+			return;
+		}
+
+		$order->update_meta_data(self::META_WEBHOOK_QUEUED, true);
+		$order->save();
+
+		wp_schedule_single_event(time(), 'dogbytemarketing_sync_mautic_send_ecommerce_order', array($order_id));
+
+		self::debug('Queued ecommerce webhook for order #' . $order_id);
+	}
+
+	/**
+	 * Send a signed JSON order payload to Ecommerce Connector.
+	 *
+	 * @param  int $order_id
+	 * @return void
+	 */
+	public function send_ecommerce_order_webhook($order_id) {
+		$order_id = (int) $order_id;
+
+		if ($order_id < 1) {
+			return;
+		}
+
+		if (!function_exists('wc_get_order')) {
+			return;
+		}
+
+		if (!$this->order_tracking || $this->order_tracking_method !== 'webhook') {
+			return;
+		}
+
+		if (!$this->base_url || !$this->webhook_secret) {
+			self::error('Skipped ecommerce webhook for order #' . $order_id . ' because the webhook is not configured.');
+			return;
+		}
+
+		$order = wc_get_order($order_id);
+
+		if (!$order) {
+			self::error('Failed to send ecommerce webhook for order #' . $order_id . ' - Unable to retrieve order.');
+			return;
+		}
+
+		if ($order->get_meta(self::META_WEBHOOK_SENT, true)) {
+			self::debug('Ecommerce webhook already sent for order #' . $order_id);
+			return;
+		}
+
+		$payload = array(
+			'order_id'       => $order->get_order_number(),
+			'order_total'    => $order->get_total(),
+			'order_source'   => 'woocommerce',
+			'order_currency' => $order->get_currency(),
+		);
+
+		$email = sanitize_email($order->get_billing_email());
+
+		if ($email) {
+			$payload['email'] = $email;
+		}
+
+		$clickthrough = $this->get_order_clickthrough($order);
+		if ($clickthrough) {
+			$payload['ct'] = $clickthrough;
+		}
+
+		if ($this->order_line_items) {
+			$items = $this->get_order_line_items($order);
+
+			if ($items) {
+				$payload['items'] = $items;
+			}
+		}
+
+		$json = wp_json_encode($payload);
+
+		if (!$json) {
+			self::error('Failed to encode ecommerce webhook payload for order #' . $order_id);
+			return;
+		}
+
+		$signature = hash_hmac('sha256', $json, $this->webhook_secret);
+		$url       = untrailingslashit($this->base_url) . '/ecommerce/order';
+
+		self::debug('Sending ecommerce webhook for order #' . $order_id);
+
+		$request = wp_remote_post(
+			$url,
+			array(
+				'timeout' => self::WEBHOOK_TIMEOUT,
+				'headers' => array(
+					'Content-Type'                 => 'application/json',
+					'X-Mautic-Ecommerce-Signature' => $signature,
+				),
+				'body'    => $json,
+			)
+		);
+
+		if (is_wp_error($request)) {
+			self::error('Ecommerce webhook failed for order #' . $order_id . ': ' . $request->get_error_message());
+			return;
+		}
+
+		$response_code = wp_remote_retrieve_response_code($request);
+
+		if ($response_code == 200 || $response_code == 201) {
+			$order->update_meta_data(self::META_WEBHOOK_SENT, true);
+			$order->save();
+
+			self::debug('Ecommerce webhook sent for order #' . $order_id);
+			return;
+		}
+
+		self::error('Ecommerce webhook failed for order #' . $order_id . ', response code: ' . $response_code);
+	}
+
+	/**
+	 * Capture a Mautic clickthrough token from the URL into a first-party cookie.
+	 *
+	 * @return void
+	 */
+	public function capture_clickthrough() {
+		if (is_admin() || wp_doing_cron() || !$this->is_webhook_clickthrough_enabled()) {
+			return;
+		}
+
+		if (!isset($_GET['ct'])) {
+			return;
+		}
+
+		$clickthrough = $this->sanitize_clickthrough(wp_unslash($_GET['ct']));
+
+		if ($clickthrough === '') {
+			return;
+		}
+
+		$this->set_clickthrough_cookie($clickthrough);
+		self::debug('Captured Mautic clickthrough token');
+	}
+
+	/**
+	 * Store a captured clickthrough token on a classic checkout order.
+	 *
+	 * @param  int $order_id
+	 * @return void
+	 */
+	public function store_clickthrough_on_order($order_id) {
+		$this->persist_clickthrough_to_order((int) $order_id);
+	}
+
+	/**
+	 * Store a captured clickthrough token on a block checkout order.
+	 *
+	 * @param  mixed $order
+	 * @return void
+	 */
+	public function store_clickthrough_on_store_api_order($order) {
+		if (is_object($order) && method_exists($order, 'get_id')) {
+			$this->persist_clickthrough_to_order((int) $order->get_id());
+		}
+	}
+
+	/**
+	 * Persist the clickthrough cookie onto the order for the signed webhook.
+	 *
+	 * @param  int $order_id
+	 * @return void
+	 */
+	private function persist_clickthrough_to_order($order_id) {
+		if ($order_id < 1 || !$this->is_webhook_clickthrough_enabled() || !function_exists('wc_get_order')) {
+			return;
+		}
+
+		$order = wc_get_order($order_id);
+
+		if (!$order) {
+			return;
+		}
+
+		if ($order->get_meta(self::META_CLICKTHROUGH, true)) {
+			return;
+		}
+
+		$clickthrough = $this->get_clickthrough_cookie();
+
+		if ($clickthrough === '') {
+			return;
+		}
+
+		$order->update_meta_data(self::META_CLICKTHROUGH, $clickthrough);
+		$order->save();
+	}
+
+	/**
+	 * Clickthrough token for an order: stored meta, then cookie as a fallback.
+	 *
+	 * @param  \WC_Order $order
+	 * @return string
+	 */
+	private function get_order_clickthrough($order) {
+		if (!$this->is_webhook_clickthrough_enabled() || !$order) {
+			return '';
+		}
+
+		$stored = $this->sanitize_clickthrough($order->get_meta(self::META_CLICKTHROUGH, true));
+
+		if ($stored !== '') {
+			return $stored;
+		}
+
+		$from_cookie = $this->get_clickthrough_cookie();
+
+		if ($from_cookie === '') {
+			return '';
+		}
+
+		$order->update_meta_data(self::META_CLICKTHROUGH, $from_cookie);
+		$order->save();
+
+		return $from_cookie;
+	}
+
+	/**
+	 * @return string
+	 */
+	private function get_clickthrough_cookie() {
+		if (empty($_COOKIE[self::CLICKTHROUGH_COOKIE])) {
+			return '';
+		}
+
+		return $this->sanitize_clickthrough(rawurldecode(wp_unslash($_COOKIE[self::CLICKTHROUGH_COOKIE])));
+	}
+
+	/**
+	 * @param  string $clickthrough
+	 * @return void
+	 */
+	private function set_clickthrough_cookie($clickthrough) {
+		$path   = (defined('COOKIEPATH') && COOKIEPATH) ? COOKIEPATH : '/';
+		$domain = (defined('COOKIE_DOMAIN') && COOKIE_DOMAIN) ? COOKIE_DOMAIN : '';
+		$value  = rawurlencode($clickthrough);
+
+		setcookie(
+			self::CLICKTHROUGH_COOKIE,
+			$value,
+			array(
+				'expires'  => time() + self::CLICKTHROUGH_COOKIE_TTL,
+				'path'     => $path,
+				'domain'   => $domain,
+				'secure'   => is_ssl(),
+				'httponly' => true,
+				'samesite' => 'Lax',
+			)
+		);
+
+		$_COOKIE[self::CLICKTHROUGH_COOKIE] = $value;
+	}
+
+	/**
+	 * @param  mixed $clickthrough
+	 * @return string
+	 */
+	private function sanitize_clickthrough($clickthrough) {
+		if (!is_string($clickthrough) || $clickthrough === '') {
+			return '';
+		}
+
+		$clickthrough = trim($clickthrough);
+
+		if (strlen($clickthrough) > self::CLICKTHROUGH_MAX_LENGTH) {
+			return '';
+		}
+
+		if (!preg_match('/^[A-Za-z0-9+\/=%_-]+$/', $clickthrough)) {
+			return '';
+		}
+
+		return $clickthrough;
+	}
+
+	/**
+	 * Clickthrough collection applies only to signed webhook tracking.
+	 *
+	 * @return bool
+	 */
+	private function is_webhook_clickthrough_enabled() {
+		return $this->order_tracking && $this->order_tracking_method === 'webhook' && $this->collect_clickthrough;
+	}
 	
 	/**
 	 * Add endpoint for webhooks to connect to
@@ -686,6 +1180,14 @@ class Sync_Mautic
 	 * @return void
 	 */
 	public function add_checkout_lead($order_id) {
+		$nonce = isset($_POST['woocommerce-process-checkout-nonce'])
+			? sanitize_text_field(wp_unslash($_POST['woocommerce-process-checkout-nonce']))
+			: '';
+
+		if (!$nonce || !wp_verify_nonce($nonce, 'woocommerce-process_checkout')) {
+			return;
+		}
+
 		$newsletter_signup = isset($_POST['newsletter_signup']) ? sanitize_text_field(wp_unslash($_POST['newsletter_signup'])) : '';
 
 		if ($newsletter_signup) {
@@ -945,6 +1447,27 @@ class Sync_Mautic
 	public function add_admin_menu() {
 		add_submenu_page('options-general.php', 'Sync Mautic Settings', 'Sync Mautic', 'manage_options', 'sync-mautic', array($this, 'options_page'));
 	}
+
+	/**
+	 * Enqueue admin styles on the settings page.
+	 *
+	 * @param  string $hook
+	 * @return void
+	 */
+	public function enqueue_admin_scripts($hook) {
+		if ($hook !== 'settings_page_sync-mautic') {
+			return;
+		}
+
+		$style_path = plugin_dir_path(__FILE__) . 'css/admin.css';
+
+		wp_enqueue_style(
+			'sync-mautic-admin',
+			plugins_url('/css/admin.css', __FILE__),
+			array(),
+			file_exists($style_path) ? filemtime($style_path) : self::VERSION
+		);
+	}
 	
 	/**
 	 * Initialize Settings
@@ -1046,16 +1569,15 @@ class Sync_Mautic
 	 */
 	public function base_url_render() {
 	?>
-		<input type='text' name='dogbytemarketing_sync_mautic_settings[base_url]' placeholder="https://mautic.domain.com" value='<?php echo esc_attr($this->base_url); ?>' style="width: 400px;">
-		<p>The base url of your Mautic instance.<br />
-		Example: https://mautic.domain.com</p>
+		<input type="text" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[base_url]" placeholder="https://mautic.domain.com" value="<?php echo esc_attr($this->base_url); ?>">
+		<p class="description">The base URL of your Mautic instance. Example: https://mautic.domain.com</p>
 	<?php
 	}
 
 	
 	public function api_howto_render() {
-		echo '<div class="notice inline" style="margin-left: 0; background-color: orange; color: #fff; border-color: orange;">';
-		echo '<p>When you setup API creditials in Mautic your Redirect URI will be ' . esc_url(untrailingslashit(home_url()));
+		echo '<div class="sync-mautic-callout">';
+		echo '<p style="margin:0;">When you set up API credentials in Mautic, your Redirect URI will be <code>' . esc_html(untrailingslashit(home_url())) . '</code></p>';
 		echo '</div>';
 	}
 	
@@ -1066,8 +1588,8 @@ class Sync_Mautic
 	 */
 	public function client_id_render() {
 	?>
-		<input type='text' name='dogbytemarketing_sync_mautic_settings[client_id]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_id); ?>' style="width: 400px;">
-		<p>The Public Key or Client ID from Mautic Settings -> Integrations -> API Credentials. Older Mautic versions are under Settings -> API Creditials.</p>
+		<input type="text" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[client_id]" placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value="<?php echo esc_attr($this->client_id); ?>">
+		<p class="description">The Public Key or Client ID from Mautic Settings → Integrations → API Credentials. Older Mautic versions are under Settings → API Credentials.</p>
 	<?php
 	}
 	
@@ -1078,8 +1600,8 @@ class Sync_Mautic
 	 */
 	public function client_secret_render() {
 	?>
-		<input type='password' name='dogbytemarketing_sync_mautic_settings[client_secret]' placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value='<?php echo esc_attr($this->client_secret); ?>' style="width: 400px;">
-		<p>The Secret Key or Client Secret from Mautic Settings -> API Creditials. Older Mautic versions are under Settings -> API Creditials.</p>
+		<input type="password" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[client_secret]" placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value="<?php echo esc_attr($this->client_secret); ?>" autocomplete="new-password">
+		<p class="description">The Secret Key or Client Secret from Mautic Settings → API Credentials. Older Mautic versions are under Settings → API Credentials.</p>
 	<?php
 	}
 	
@@ -1091,16 +1613,22 @@ class Sync_Mautic
 	public function order_tagging_render() {
 		$order_tagging = isset($this->settings['order_tagging']) ? $this->settings['order_tagging'] : array();
     ?>
-    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="categories"<?php echo in_array('categories', $order_tagging) ? ' checked' : ''; ?>>
-    <label for="categories">Categories</label><br />
-    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="brands"<?php echo in_array('brands', $order_tagging) ? ' checked' : ''; ?>>
-    <label for="brands">Brands</label><br />
-    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="products"<?php echo in_array('products', $order_tagging) ? ' checked' : ''; ?>>
-    <label for="products">Products</label><br />
-		<p>
-			This will add tags to existing contacts for the categories and/or brands of products they have purchased that have <strong>completed</strong> statuses. This will sync past orders.<br />
-			<strong>This will tie Mautic IDs to User IDs. Before enabling, make sure you are in compliance with data protection regulations.<strong>
-		</p>
+    <div class="sync-mautic-choices">
+		<label class="sync-mautic-choice" for="sync-mautic-tag-categories">
+			<input type="checkbox" id="sync-mautic-tag-categories" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="categories"<?php echo in_array('categories', $order_tagging) ? ' checked' : ''; ?>>
+			Categories
+		</label>
+		<label class="sync-mautic-choice" for="sync-mautic-tag-brands">
+			<input type="checkbox" id="sync-mautic-tag-brands" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="brands"<?php echo in_array('brands', $order_tagging) ? ' checked' : ''; ?>>
+			Brands
+		</label>
+		<label class="sync-mautic-choice" for="sync-mautic-tag-products">
+			<input type="checkbox" id="sync-mautic-tag-products" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="products"<?php echo in_array('products', $order_tagging) ? ' checked' : ''; ?>>
+			Products
+		</label>
+    </div>
+		<p class="description">Adds tags to existing contacts for the categories, brands, and/or products they purchased on completed orders. This will sync past orders.</p>
+		<p class="sync-mautic-notice">This ties Mautic IDs to WordPress user IDs. Make sure you are in compliance with data protection regulations before enabling.</p>
 		<?php
 	}
 	
@@ -1112,12 +1640,13 @@ class Sync_Mautic
 	public function checkout_optin_render() {
 		$checkout_optin = isset($this->settings['checkout_optin']) ? $this->settings['checkout_optin'] : 'disabled';
     ?>
-    <select name="dogbytemarketing_sync_mautic_settings[checkout_optin]" id="checkout_checkbox" style="width: 400px;">
+    <select class="sync-mautic-select" name="dogbytemarketing_sync_mautic_settings[checkout_optin]" id="checkout_checkbox">
 			<option value="disabled" <?php selected($checkout_optin, 'disabled'); ?>>Disabled</option>
 			<option value="unchecked" <?php selected($checkout_optin, 'unchecked'); ?>>Unchecked</option>
 			<option value="checked" <?php selected($checkout_optin, 'checked'); ?>>Checked</option>
     </select>
-		<p><strong>You should use "Unchecked" for data protection regulation compliance.</strong></p>
+		<p class="description">Adds a newsletter checkbox at WooCommerce checkout.</p>
+		<p class="sync-mautic-notice">Use Unchecked for data protection regulation compliance.</p>
 		<?php
 	}
 	
@@ -1127,25 +1656,93 @@ class Sync_Mautic
 	 * @return void
 	 */
 	public function order_tracking_render() {
-		$order_tracking = isset($this->settings['order_tracking']) ? $this->settings['order_tracking'] : false;
+		$order_tracking        = isset($this->settings['order_tracking']) ? $this->settings['order_tracking'] : false;
+		$order_tracking_method = isset($this->settings['order_tracking_method']) ? $this->settings['order_tracking_method'] : 'page_hits';
+		$order_line_items      = isset($this->settings['order_line_items']) ? $this->settings['order_line_items'] : false;
+		$collect_clickthrough  = isset($this->settings['collect_clickthrough']) ? $this->settings['collect_clickthrough'] : false;
+		$webhook_secret        = isset($this->settings['webhook_secret']) ? $this->settings['webhook_secret'] : '';
+
+		if ($order_tracking_method !== 'webhook') {
+			$order_tracking_method = 'page_hits';
+		}
 	?>
-		<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tracking]" id="order_tracking" <?php checked(1, $order_tracking, true); ?> /> Enable
-		<p>Track WooCommerce revenue related to emails via WP Mautic frontend.<br />
-		Requires <a href="https://github.com/mautic/mautic/releases/tag/7.0.0" target="_blank">Mautic 7</a> with our <a href="https://www.dogbytemarketing.com/shop/ecommerce-connector/" target="_blank">eCommerce Connector</a>, and the official <a href="https://wordpress.org/plugins/wp-mautic/" target="_blank">WP Mautic</a> plugin to be installed and enabled.<br/>
-		<strong>Make sure you are in compliance with data protection regulations before enabling this option.</strong></p>
+		<label class="sync-mautic-switch" for="order_tracking">
+			<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tracking]" id="order_tracking" value="on" <?php checked(1, $order_tracking, true); ?> />
+			Enable order tracking
+		</label>
+		<p class="description">Track WooCommerce revenue related to emails using our <a href="https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/" target="_blank" rel="noopener noreferrer">eCommerce Connector</a>.</p>
+		<p class="sync-mautic-notice">Update your privacy and cookie policies along with cookie acceptance banners so they disclose that order, purchase, and revenue information may be sent to and stored in Mautic for marketing analytics, email attribution, segmentation, and contact profiling. Tracking only applies after you enable it.</p>
+
+		<div id="sync-mautic-order-tracking-options" class="sync-mautic-panel">
+			<p class="sync-mautic-label">Tracking method</p>
+			<div class="sync-mautic-methods">
+				<label class="sync-mautic-method" for="order_tracking_method_page_hits">
+					<span class="sync-mautic-method__title">
+						<input type="radio" name="dogbytemarketing_sync_mautic_settings[order_tracking_method]" id="order_tracking_method_page_hits" value="page_hits" <?php checked($order_tracking_method, 'page_hits'); ?> />
+						Page hits (mtc)
+					</span>
+					<span class="sync-mautic-method__body">Adds order fields to the WP Mautic pageview on the confirmation page. Requires WP Mautic. Uses cookies. Mautic already attributes the email from that page hit. Line items are capped at 20.</span>
+				</label>
+				<label class="sync-mautic-method" for="order_tracking_method_webhook">
+					<span class="sync-mautic-method__title">
+						<input type="radio" name="dogbytemarketing_sync_mautic_settings[order_tracking_method]" id="order_tracking_method_webhook" value="webhook" <?php checked($order_tracking_method, 'webhook'); ?> />
+						Signed webhook
+					</span>
+					<span class="sync-mautic-method__body">Server-to-server POST when the order is completed. Does not set cookies, but still processes personal data. Requires eCommerce Connector 1.3.0. Enable Collect clickthrough to attribute revenue to the clicked email.</span>
+				</label>
+			</div>
+
+			<div class="sync-mautic-option">
+				<label for="order_line_items">
+					<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_line_items]" id="order_line_items" value="on" <?php checked(1, $order_line_items, true); ?> />
+					Send line items
+				</label>
+				<p class="description">Include product ID, name, quantity, and first category. Requires eCommerce Connector 1.3.0. Defaults to off. Page hits send the first 20 line items; signed webhook sends every line item.</p>
+			</div>
+
+			<div id="sync-mautic-webhook-options">
+				<div class="sync-mautic-option">
+					<label for="collect_clickthrough">
+						<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[collect_clickthrough]" id="collect_clickthrough" value="on" <?php checked(1, $collect_clickthrough, true); ?> />
+						Collect clickthrough
+					</label>
+					<p class="description">Signed webhook only. Stores the Mautic <code>ct</code> token in a first-party cookie for 30 days and sends it with the webhook so revenue can be attributed to that email. Defaults to off. Update your privacy and cookie policies along with cookie acceptance banners before enabling.</p>
+				</div>
+				<p class="sync-mautic-label"><label for="webhook_secret">Webhook secret</label></p>
+				<input type="password" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[webhook_secret]" id="webhook_secret" value="<?php echo esc_attr($webhook_secret); ?>" autocomplete="new-password" />
+				<p class="description">Required for signed webhook. Paste the webhook secret from Mautic -> Plugins -> Ecommerce Connector -> Webhook. This is not your OAuth Client Secret.</p>
+			</div>
+		</div>
+		<script>
+		(function () {
+			function syncMauticToggleOrderTracking() {
+				var enabled = document.getElementById('order_tracking');
+				var webhook = document.getElementById('order_tracking_method_webhook');
+				var options = document.getElementById('sync-mautic-order-tracking-options');
+				var secretRow = document.getElementById('sync-mautic-webhook-options');
+				if (!enabled || !webhook || !options || !secretRow) {
+					return;
+				}
+				options.classList.toggle('is-disabled', !enabled.checked);
+				secretRow.style.display = webhook.checked ? 'block' : 'none';
+			}
+			document.getElementById('order_tracking') && document.getElementById('order_tracking').addEventListener('change', syncMauticToggleOrderTracking);
+			document.getElementById('order_tracking_method_page_hits') && document.getElementById('order_tracking_method_page_hits').addEventListener('change', syncMauticToggleOrderTracking);
+			document.getElementById('order_tracking_method_webhook') && document.getElementById('order_tracking_method_webhook').addEventListener('change', syncMauticToggleOrderTracking);
+			syncMauticToggleOrderTracking();
+		})();
+		</script>
 	<?php
 	}
 	
-	/**
-	 * Resync Past Orders Field
-	 *
-	 * @return void
-	 */
 	public function resync_past_orders_render() {
     $resync_past_orders = isset($this->settings['resync_past_orders']) ? $this->settings['resync_past_orders'] : '';
 	?>
-    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[resync_past_orders]" id="resync_past_orders" <?php checked(1, $resync_past_orders, true); ?> /> Yes
-		<p><strong>If you make changes to order tagging and want to resync past orders to reflect those changes, check this box.</strong></p>
+    <label class="sync-mautic-switch" for="resync_past_orders">
+		<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[resync_past_orders]" id="resync_past_orders" <?php checked(1, $resync_past_orders, true); ?> />
+		Resync past orders
+	</label>
+		<p class="description">Check this if you change order tagging and want past completed orders tagged again. This only re-applies tags. It does not send past orders to Ecommerce Connector tracking.</p>
 	<?php
 	}
 	
@@ -1157,7 +1754,10 @@ class Sync_Mautic
 	public function debug_mode_render() {
     $debug_mode = isset($this->settings['debug_mode']) ? $this->settings['debug_mode'] : '';
 	?>
-    <input type="checkbox" name="dogbytemarketing_sync_mautic_settings[debug_mode]" id="debug_mode" <?php checked(1, $debug_mode, true); ?> /> Enable
+    <label class="sync-mautic-switch" for="debug_mode">
+		<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[debug_mode]" id="debug_mode" <?php checked(1, $debug_mode, true); ?> />
+		Enable debug logging
+	</label>
 	<?php
 	}
 	
@@ -1168,21 +1768,20 @@ class Sync_Mautic
 	 */
 	public function options_page() {
 	?>
-		<form action='options.php' method='post'>
-			<h1>Sync Mautic Settings</h1>
+		<div class="wrap sync-mautic-settings">
+			<form action="options.php" method="post">
+				<h1>Sync Mautic Settings</h1>
 
-			<?php
-			settings_fields('dogbytemarketing_sync_mautic');
-			do_settings_sections('dogbytemarketing_sync_mautic');
-			?>
-			<p style="background-color: #00A32A; text-align: center; padding: 20px; color: #fff; width: 62%;">
-				If you need assistance with your Email Marketing efforts, we at <a href="https://www.dogbytemarketing.com" style="text-decoration: none; color: #fff; font-weight: 700;" target="_blank">Dog Byte Marketing</a> are here to help! We offer a wide array of services. Feel free to give us a call at <a href="tel:4237248922" style="text-decoration: none; color: #fff; font-weight: 700;" target="_blank">(423) 724 - 8922</a>.<br />
-				We're based out of Tennessee in the US.</p>
-			<?php
-			submit_button();
-			?>
-
-		</form>
+				<?php
+				settings_fields('dogbytemarketing_sync_mautic');
+				do_settings_sections('dogbytemarketing_sync_mautic');
+				?>
+				<div class="sync-mautic-support">
+					If you need assistance with your email marketing efforts, we at <a href="https://www.dogbytemarketing.com" target="_blank" rel="noopener noreferrer">Dog Byte Marketing</a> are here to help. Call <a href="tel:4237248922">(423) 724-8922</a>. We're based in Tennessee in the US.
+				</div>
+				<?php submit_button(); ?>
+			</form>
+		</div>
 	<?php
 	}
   
@@ -1250,6 +1849,35 @@ class Sync_Mautic
       $sanitary_values['order_tracking'] = false;
     }
 
+	$order_tracking_method = isset($input['order_tracking_method']) ? sanitize_text_field($input['order_tracking_method']) : 'page_hits';
+	if ($order_tracking_method !== 'webhook') {
+		$order_tracking_method = 'page_hits';
+	}
+	$sanitary_values['order_tracking_method'] = $order_tracking_method;
+
+	if (isset($input['order_line_items']) && $input['order_line_items']) {
+		$sanitary_values['order_line_items'] = $input['order_line_items'] === 'on' ? true : false;
+	} else {
+		$sanitary_values['order_line_items'] = false;
+	}
+
+	if (isset($input['collect_clickthrough']) && $input['collect_clickthrough']) {
+		$sanitary_values['collect_clickthrough'] = $input['collect_clickthrough'] === 'on' ? true : false;
+	} else {
+		$sanitary_values['collect_clickthrough'] = false;
+	}
+
+	$sanitary_values['webhook_secret'] = isset($input['webhook_secret']) ? sanitize_text_field($input['webhook_secret']) : '';
+
+	if ($sanitary_values['order_tracking'] && $sanitary_values['order_tracking_method'] === 'webhook' && $sanitary_values['webhook_secret'] === '') {
+		add_settings_error(
+			'dogbytemarketing_sync_mautic',
+			'missing_webhook_secret',
+			'Webhook secret is required when Signed webhook is selected. Copy it from Mautic → Plugins → Ecommerce Connector → Webhook.',
+			'error'
+		);
+	}
+
 		if (isset($input['debug_mode']) && $input['debug_mode']) {
       $sanitary_values['debug_mode'] = $input['debug_mode'] === 'on' ? true : false;
     } else {
@@ -1296,6 +1924,75 @@ class Sync_Mautic
     </div>
     <?php
   }
+
+	/**
+	 * Show a one-time notice about 1.1.0 ecommerce tracking options.
+	 *
+	 * @return void
+	 */
+	public function maybe_show_1_1_0_notice() {
+		if (!current_user_can('manage_options')) {
+			return;
+		}
+
+		if (get_option('dogbytemarketing_sync_mautic_dismissed_notice_1_1_0')) {
+			return;
+		}
+
+		add_action('admin_notices', array($this, 'display_1_1_0_notice'));
+	}
+
+	/**
+	 * Display the 1.1.0 update notice.
+	 *
+	 * @return void
+	 */
+	public function display_1_1_0_notice() {
+		$dismiss_url = wp_nonce_url(
+			admin_url('admin-post.php?action=dogbytemarketing_dismiss_sync_mautic_1_1_0'),
+			'dogbytemarketing_dismiss_sync_mautic_1_1_0'
+		);
+		$settings_url = admin_url('options-general.php?page=sync-mautic');
+		?>
+		<div class="notice notice-info">
+			<p>
+				<strong>Sync Mautic 1.1.0:</strong>
+				WooCommerce order tracking now has optional line items and a signed webhook method. Both default to off.
+				Line items and signed webhook require <strong>eCommerce Connector 1.3.0</strong>.
+				Collect clickthrough is optional for signed webhook only.
+				Update your privacy and cookie policies along with cookie acceptance banners so they disclose that order, purchase, and revenue information may be sent to and stored in Mautic for marketing analytics, email attribution, segmentation, and contact profiling.
+			</p>
+			<p>
+				<a href="<?php echo esc_url($settings_url); ?>">Review settings</a>
+				|
+				<a href="<?php echo esc_url($dismiss_url); ?>">Dismiss</a>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Dismiss the 1.1.0 update notice.
+	 *
+	 * @return void
+	 */
+	public function dismiss_1_1_0_notice() {
+		if (!current_user_can('manage_options')) {
+			wp_die(esc_html__('You do not have permission to dismiss this notice.', 'sync-mautic'));
+		}
+
+		check_admin_referer('dogbytemarketing_dismiss_sync_mautic_1_1_0');
+
+		update_option('dogbytemarketing_sync_mautic_dismissed_notice_1_1_0', true);
+
+		$redirect = wp_get_referer();
+		if (!$redirect) {
+			$redirect = admin_url('options-general.php?page=sync-mautic');
+		}
+
+		wp_safe_redirect($redirect);
+		exit;
+	}
 	
 	/**
 	 * Gets the Mautic access token.
@@ -1386,6 +2083,7 @@ class Sync_Mautic
    */
   public static function deactivation() {
     wp_clear_scheduled_hook('dogbytemarketing_sync_mautic_past_orders');
+    wp_unschedule_hook('dogbytemarketing_sync_mautic_send_ecommerce_order');
   }
 	
 	/**
