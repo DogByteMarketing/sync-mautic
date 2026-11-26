@@ -32,6 +32,8 @@ Features:
 * Tag subscribed contacts with categories they have purchased from
 * Tag subscribed contacts with brands they have purchased from
 
+Want to help? Submit a PR on [Github](https://github.com/DogByteMarketing/sync-mautic/).
+
 
 == Installation ==
 
