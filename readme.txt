@@ -2,7 +2,7 @@
 Contributors: dogbytemarketing, polyplugins
 Tags: sync, mautic, marketing, email, email marketing
 Tested up to: 7.1
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 Requires PHP: 7.4
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -108,6 +108,10 @@ You are solely responsible for how you deploy and use this plugin, including com
 
 
 == Changelog ==
+
+= 1.2.0 =
+* Added: New settings design
+* Updated: Tested up to
 
 = 1.1.0 =
 * Added: Optional line items on WooCommerce order tracking (product ID, name, quantity, first category). Requires eCommerce Connector 1.3.0. Defaults to off.

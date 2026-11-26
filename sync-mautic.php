@@ -5,7 +5,7 @@
  * Plugin URI: https://www.dogbytemarketing.com/contact/
  * Description: Syncs leads passed via webhooks along with syncing order product, categories, and brands to Mautic.
  * Author: Dog Byte Marketing
- * Version: 1.1.0
+ * Version: 1.2.0
  * Requires at least: 6.6.2
  * Requires PHP: 7.4
  * Author URI: https://www.dogbytemarketing.com
@@ -239,8 +239,10 @@ class Sync_Mautic
 		add_filter('cron_schedules', array($this, 'mautic_schedule'));
 		add_action('admin_menu', array($this, 'add_admin_menu'));
 		add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
+		add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'plugin_action_links'));
 		add_action('admin_init', array($this, 'settings_init'));
 		add_action('admin_init', array($this, 'maybe_show_1_1_0_notice'));
+		add_action('wp_ajax_sync_mautic_test_connection', array($this, 'ajax_test_connection'));
 	}
 	
 	/**
@@ -249,8 +251,8 @@ class Sync_Mautic
 	 * @return void
 	 */
 	public function enqueue_scripts() {
-		wp_enqueue_style('newsletter-signup', plugins_url('/css/public.css', __FILE__), array(), filemtime(plugin_dir_path(dirname(__FILE__)) . dirname(plugin_basename(__FILE__))  . '/css/public.css'));
-		wp_enqueue_script('newsletter-signup', plugins_url('/js/public.js', __FILE__), array('jquery'), filemtime(plugin_dir_path(dirname(__FILE__)) . dirname(plugin_basename(__FILE__))  . '/js/public.js'), true);
+		wp_enqueue_style('newsletter-signup', plugins_url('/assets/css/public.css', __FILE__), array(), filemtime(plugin_dir_path(__FILE__) . 'assets/css/public.css'));
+		wp_enqueue_script('newsletter-signup', plugins_url('/assets/js/public.js', __FILE__), array('jquery'), filemtime(plugin_dir_path(__FILE__) . 'assets/js/public.js'), true);
 		wp_localize_script('newsletter-signup', 'newsletter_signup_object',
 			array(
 				'site_url' => site_url(),
@@ -945,11 +947,11 @@ class Sync_Mautic
 			return;
 		}
 
-		if (!isset($_GET['ct'])) {
+		if (!isset($_GET['ct']) || !is_string($_GET['ct'])) {
 			return;
 		}
 
-		$clickthrough = $this->sanitize_clickthrough(wp_unslash($_GET['ct']));
+		$clickthrough = $this->sanitize_clickthrough(wp_strip_all_tags(wp_unslash($_GET['ct'])));
 
 		if ($clickthrough === '') {
 			return;
@@ -1045,11 +1047,11 @@ class Sync_Mautic
 	 * @return string
 	 */
 	private function get_clickthrough_cookie() {
-		if (empty($_COOKIE[self::CLICKTHROUGH_COOKIE])) {
+		if (empty($_COOKIE[self::CLICKTHROUGH_COOKIE]) || !is_string($_COOKIE[self::CLICKTHROUGH_COOKIE])) {
 			return '';
 		}
 
-		return $this->sanitize_clickthrough(rawurldecode(wp_unslash($_COOKIE[self::CLICKTHROUGH_COOKIE])));
+		return $this->sanitize_clickthrough(rawurldecode(wp_strip_all_tags(wp_unslash($_COOKIE[self::CLICKTHROUGH_COOKIE]))));
 	}
 
 	/**
@@ -1460,18 +1462,50 @@ class Sync_Mautic
 	 * @return void
 	 */
 	public function enqueue_admin_scripts($hook) {
-		if ($hook !== 'settings_page_sync-mautic') {
+		$is_settings = ($hook === 'settings_page_sync-mautic');
+		$is_plugins  = ($hook === 'plugins.php');
+
+		if (!$is_settings && !$is_plugins) {
 			return;
 		}
 
-		$style_path = plugin_dir_path(__FILE__) . 'css/admin.css';
+		$style_path = plugin_dir_path(__FILE__) . 'assets/css/admin.css';
 
 		wp_enqueue_style(
 			'sync-mautic-admin',
-			plugins_url('/css/admin.css', __FILE__),
+			plugins_url('/assets/css/admin.css', __FILE__),
 			array(),
 			file_exists($style_path) ? filemtime($style_path) : self::VERSION
 		);
+
+		if (!$is_settings) {
+			return;
+		}
+
+		$script_path = plugin_dir_path(__FILE__) . 'assets/js/settings.js';
+
+		wp_enqueue_script(
+			'sync-mautic-settings',
+			plugins_url('/assets/js/settings.js', __FILE__),
+			array('jquery'),
+			file_exists($script_path) ? filemtime($script_path) : self::VERSION,
+			true
+		);
+	}
+
+	/**
+	 * Add Settings and Support links on the Plugins screen.
+	 *
+	 * @param  array $links
+	 * @return array
+	 */
+	public function plugin_action_links($links) {
+		$settings_link = '<a class="sync-mautic-plugin-settings" href="' . esc_url(admin_url('options-general.php?page=sync-mautic')) . '">' . esc_html__('Settings', 'sync-mautic') . '</a>';
+		$support_link  = '<a class="sync-mautic-plugin-support" href="' . esc_url(admin_url('options-general.php?page=sync-mautic#support')) . '">' . esc_html__('Support', 'sync-mautic') . '</a>';
+
+		array_unshift($links, $settings_link, $support_link);
+
+		return $links;
 	}
 	
 	/**
@@ -1559,7 +1593,7 @@ class Sync_Mautic
 
 			add_settings_field(
 				'debug_mode',
-				__('Debug Mode', 'sync-mautic'),
+				__('Logging', 'sync-mautic'),
 				array($this, 'debug_mode_render'),
 				'dogbytemarketing_sync_mautic',
 				'dogbytemarketing_sync_mautic_section'
@@ -1574,16 +1608,49 @@ class Sync_Mautic
 	 */
 	public function base_url_render() {
 	?>
-		<input type="text" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[base_url]" placeholder="https://mautic.domain.com" value="<?php echo esc_attr($this->base_url); ?>">
-		<p class="description">The base URL of your Mautic instance. Example: https://mautic.domain.com</p>
+		<label class="sync-mautic-general__label" for="sync-mautic-base-url"><?php esc_html_e('Mautic Base URL', 'sync-mautic'); ?></label>
+		<input type="text" class="sync-mautic-input" id="sync-mautic-base-url" name="dogbytemarketing_sync_mautic_settings[base_url]" placeholder="https://mautic.example.com" value="<?php echo esc_attr($this->base_url); ?>">
+		<p class="description"><?php esc_html_e('The URL of your Mautic installation.', 'sync-mautic'); ?></p>
 	<?php
 	}
 
-	
+	public function connection_status_render() {
+		$connected = $this->base_url && $this->client_id && $this->client_secret && get_transient('dogbytemarketing_mautic_access_token');
+	?>
+		<div class="sync-mautic-connection">
+			<span class="sync-mautic-connection__icon" aria-hidden="true"><span class="dashicons dashicons-rest-api"></span></span>
+			<div class="sync-mautic-connection__body">
+				<h2 class="sync-mautic-connection__title"><?php esc_html_e('Mautic Connection', 'sync-mautic'); ?></h2>
+				<p class="sync-mautic-connection__text"><?php esc_html_e('Manage the connection to your Mautic instance.', 'sync-mautic'); ?></p>
+			</div>
+			<span class="sync-mautic-connection__status<?php echo $connected ? ' is-connected' : ''; ?>"><?php echo $connected ? esc_html__('Connected', 'sync-mautic') : esc_html__('Not connected', 'sync-mautic'); ?></span>
+		</div>
+	<?php
+	}
+
 	public function api_howto_render() {
-		echo '<div class="sync-mautic-callout">';
-		echo '<p style="margin:0;">When you set up API credentials in Mautic, your Redirect URI will be <code>' . esc_html(untrailingslashit(home_url())) . '</code></p>';
-		echo '</div>';
+		$redirect_uri = untrailingslashit(home_url());
+	?>
+		<h2 class="sync-mautic-general__title"><?php esc_html_e('Setup Instructions', 'sync-mautic'); ?></h2>
+		<p class="sync-mautic-general__intro"><?php esc_html_e('Follow these steps to connect Sync Mautic to your website.', 'sync-mautic'); ?></p>
+		<ol class="sync-mautic-steps">
+			<li><?php esc_html_e('Log in to your Mautic instance.', 'sync-mautic'); ?></li>
+			<li><?php esc_html_e('Navigate to API Credentials in Mautic settings.', 'sync-mautic'); ?></li>
+			<li><?php esc_html_e('Create new OAuth 2 credentials using the Redirect URI below.', 'sync-mautic'); ?></li>
+			<li><?php esc_html_e('Enter your Client ID and Client Secret.', 'sync-mautic'); ?></li>
+			<li><?php esc_html_e('Save your settings and authorize the connection.', 'sync-mautic'); ?></li>
+		</ol>
+		<div class="sync-mautic-redirect">
+			<p class="sync-mautic-redirect__title"><span class="dashicons dashicons-info" aria-hidden="true"></span><?php esc_html_e('Redirect URI', 'sync-mautic'); ?></p>
+			<div class="sync-mautic-redirect__row">
+				<code><?php echo esc_html($redirect_uri); ?></code>
+				<button type="button" class="sync-mautic-redirect__copy" data-copy="<?php echo esc_attr($redirect_uri); ?>" aria-label="<?php esc_attr_e('Copy redirect URI', 'sync-mautic'); ?>">
+					<span class="dashicons dashicons-admin-page" aria-hidden="true"></span>
+				</button>
+			</div>
+			<p class="sync-mautic-redirect__help"><?php esc_html_e('Use this URL when creating your API credentials.', 'sync-mautic'); ?></p>
+		</div>
+	<?php
 	}
 	
 	/**
@@ -1593,8 +1660,8 @@ class Sync_Mautic
 	 */
 	public function client_id_render() {
 	?>
-		<input type="text" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[client_id]" placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value="<?php echo esc_attr($this->client_id); ?>">
-		<p class="description">The Public Key or Client ID from Mautic Settings → Integrations → API Credentials. Older Mautic versions are under Settings → API Credentials.</p>
+		<label class="sync-mautic-general__label" for="sync-mautic-client-id"><?php esc_html_e('Client ID', 'sync-mautic'); ?></label>
+		<input type="text" class="sync-mautic-input" id="sync-mautic-client-id" name="dogbytemarketing_sync_mautic_settings[client_id]" placeholder="<?php esc_attr_e('Enter your Client ID', 'sync-mautic'); ?>" value="<?php echo esc_attr($this->client_id); ?>">
 	<?php
 	}
 	
@@ -1605,8 +1672,13 @@ class Sync_Mautic
 	 */
 	public function client_secret_render() {
 	?>
-		<input type="password" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[client_secret]" placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" value="<?php echo esc_attr($this->client_secret); ?>" autocomplete="new-password">
-		<p class="description">The Secret Key or Client Secret from Mautic Settings → API Credentials. Older Mautic versions are under Settings → API Credentials.</p>
+		<label class="sync-mautic-general__label" for="sync-mautic-client-secret"><?php esc_html_e('Client Secret', 'sync-mautic'); ?></label>
+		<div class="sync-mautic-secret">
+			<input type="password" class="sync-mautic-input" id="sync-mautic-client-secret" name="dogbytemarketing_sync_mautic_settings[client_secret]" value="<?php echo esc_attr($this->client_secret); ?>" autocomplete="new-password">
+			<button type="button" class="sync-mautic-secret__toggle" aria-pressed="false" aria-label="<?php esc_attr_e('Show client secret', 'sync-mautic'); ?>">
+				<span class="dashicons dashicons-visibility" aria-hidden="true"></span>
+			</button>
+		</div>
 	<?php
 	}
 	
@@ -1617,23 +1689,28 @@ class Sync_Mautic
 	 */
 	public function order_tagging_render() {
 		$order_tagging = isset($this->settings['order_tagging']) ? $this->settings['order_tagging'] : array();
+
+		if (!is_array($order_tagging)) {
+			$order_tagging = array();
+		}
     ?>
-    <div class="sync-mautic-choices">
-		<label class="sync-mautic-choice" for="sync-mautic-tag-categories">
-			<input type="checkbox" id="sync-mautic-tag-categories" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="categories"<?php echo in_array('categories', $order_tagging) ? ' checked' : ''; ?>>
-			Categories
+    <div class="sync-mautic-radios">
+		<label class="sync-mautic-toggle" for="sync-mautic-tag-categories">
+			<input type="checkbox" id="sync-mautic-tag-categories" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="categories"<?php echo in_array('categories', $order_tagging, true) ? ' checked' : ''; ?>>
+			<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+			<?php esc_html_e('Product categories', 'sync-mautic'); ?>
 		</label>
-		<label class="sync-mautic-choice" for="sync-mautic-tag-brands">
-			<input type="checkbox" id="sync-mautic-tag-brands" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="brands"<?php echo in_array('brands', $order_tagging) ? ' checked' : ''; ?>>
-			Brands
+		<label class="sync-mautic-toggle" for="sync-mautic-tag-brands">
+			<input type="checkbox" id="sync-mautic-tag-brands" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="brands"<?php echo in_array('brands', $order_tagging, true) ? ' checked' : ''; ?>>
+			<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+			<?php esc_html_e('Product brands', 'sync-mautic'); ?>
 		</label>
-		<label class="sync-mautic-choice" for="sync-mautic-tag-products">
-			<input type="checkbox" id="sync-mautic-tag-products" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="products"<?php echo in_array('products', $order_tagging) ? ' checked' : ''; ?>>
-			Products
+		<label class="sync-mautic-toggle" for="sync-mautic-tag-products">
+			<input type="checkbox" id="sync-mautic-tag-products" name="dogbytemarketing_sync_mautic_settings[order_tagging][]" value="products"<?php echo in_array('products', $order_tagging, true) ? ' checked' : ''; ?>>
+			<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+			<?php esc_html_e('Products', 'sync-mautic'); ?>
 		</label>
     </div>
-		<p class="description">Adds tags to existing contacts for the categories, brands, and/or products they purchased on completed orders. This will sync past orders.</p>
-		<p class="sync-mautic-notice">This ties Mautic IDs to WordPress user IDs. Make sure you are in compliance with data protection regulations before enabling.</p>
 		<?php
 	}
 	
@@ -1645,13 +1722,29 @@ class Sync_Mautic
 	public function checkout_optin_render() {
 		$checkout_optin = isset($this->settings['checkout_optin']) ? $this->settings['checkout_optin'] : 'disabled';
     ?>
-    <select class="sync-mautic-select" name="dogbytemarketing_sync_mautic_settings[checkout_optin]" id="checkout_checkbox">
-			<option value="disabled" <?php selected($checkout_optin, 'disabled'); ?>>Disabled</option>
-			<option value="unchecked" <?php selected($checkout_optin, 'unchecked'); ?>>Unchecked</option>
-			<option value="checked" <?php selected($checkout_optin, 'checked'); ?>>Checked</option>
-    </select>
-		<p class="description">Adds a newsletter checkbox at WooCommerce checkout.</p>
-		<p class="sync-mautic-notice">Use Unchecked for data protection regulation compliance.</p>
+		<p class="sync-mautic-woo__label"><?php esc_html_e('Default checkbox state', 'sync-mautic'); ?></p>
+		<div class="sync-mautic-radios" id="checkout_checkbox">
+			<label class="sync-mautic-radio" for="sync-mautic-optin-checked">
+				<input type="radio" id="sync-mautic-optin-checked" name="dogbytemarketing_sync_mautic_settings[checkout_optin]" value="checked" <?php checked($checkout_optin, 'checked'); ?>>
+				<?php esc_html_e('Checked', 'sync-mautic'); ?>
+			</label>
+			<label class="sync-mautic-radio" for="sync-mautic-optin-unchecked">
+				<input type="radio" id="sync-mautic-optin-unchecked" name="dogbytemarketing_sync_mautic_settings[checkout_optin]" value="unchecked" <?php checked($checkout_optin, 'unchecked'); ?>>
+				<?php esc_html_e('Unchecked', 'sync-mautic'); ?>
+			</label>
+			<label class="sync-mautic-radio" for="sync-mautic-optin-disabled">
+				<input type="radio" id="sync-mautic-optin-disabled" name="dogbytemarketing_sync_mautic_settings[checkout_optin]" value="disabled" <?php checked($checkout_optin, 'disabled'); ?>>
+				<?php esc_html_e('Disabled', 'sync-mautic'); ?>
+			</label>
+		</div>
+		<div class="sync-mautic-woo__preview">
+			<p class="sync-mautic-woo__label"><?php esc_html_e('Checkout preview', 'sync-mautic'); ?></p>
+			<label class="sync-mautic-woo__preview-check">
+				<input type="checkbox" id="sync-mautic-optin-preview" tabindex="-1" <?php checked($checkout_optin, 'checked'); ?>>
+				<?php esc_html_e('Subscribe to our newsletter', 'sync-mautic'); ?>
+			</label>
+		</div>
+		<p class="sync-mautic-notice"><span class="dashicons dashicons-warning" aria-hidden="true"></span><span><?php esc_html_e('Use Unchecked when affirmative consent is required.', 'sync-mautic'); ?></span></p>
 		<?php
 	}
 	
@@ -1671,83 +1764,73 @@ class Sync_Mautic
 			$order_tracking_method = 'page_hits';
 		}
 	?>
-		<label class="sync-mautic-switch" for="order_tracking">
-			<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tracking]" id="order_tracking" value="on" <?php checked(1, $order_tracking, true); ?> />
-			Enable order tracking
-		</label>
-		<p class="description">Track WooCommerce revenue related to emails using our <a href="https://www.dogbytemarketing.com/shop/ecommerce-connector-for-mautic/" target="_blank" rel="noopener noreferrer">eCommerce Connector</a>.</p>
-		<p class="sync-mautic-notice">Update your privacy and cookie policies along with cookie acceptance banners so they disclose that order, purchase, and revenue information may be sent to and stored in Mautic for marketing analytics, email attribution, segmentation, and contact profiling. Tracking only applies after you enable it.</p>
+		<div class="sync-mautic-woo__head sync-mautic-woo__head--split">
+			<div class="sync-mautic-woo__heading">
+				<span class="dashicons dashicons-chart-bar" aria-hidden="true"></span>
+				<h2><?php esc_html_e('Order Tracking', 'sync-mautic'); ?></h2>
+			</div>
+			<label class="sync-mautic-toggle" for="order_tracking">
+				<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_tracking]" id="order_tracking" value="on" <?php checked(1, $order_tracking, true); ?> />
+				<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+				<span class="screen-reader-text"><?php esc_html_e('Enable order tracking', 'sync-mautic'); ?></span>
+			</label>
+		</div>
+		<p class="sync-mautic-woo__intro"><?php esc_html_e('Track WooCommerce revenue attributed to marketing emails using the eCommerce Connector for Mautic.', 'sync-mautic'); ?></p>
 
-		<div id="sync-mautic-order-tracking-options" class="sync-mautic-panel">
-			<p class="sync-mautic-label">Tracking method</p>
+		<div id="sync-mautic-order-tracking-options" class="sync-mautic-panel-box">
+			<p class="sync-mautic-woo__label"><?php esc_html_e('Tracking method', 'sync-mautic'); ?></p>
 			<div class="sync-mautic-methods">
 				<label class="sync-mautic-method" for="order_tracking_method_page_hits">
 					<span class="sync-mautic-method__title">
+						<span class="dashicons dashicons-admin-site" aria-hidden="true"></span>
 						<input type="radio" name="dogbytemarketing_sync_mautic_settings[order_tracking_method]" id="order_tracking_method_page_hits" value="page_hits" <?php checked($order_tracking_method, 'page_hits'); ?> />
-						Page hits (mtc)
+						<?php esc_html_e('Page Hits (mtc)', 'sync-mautic'); ?>
 					</span>
-					<span class="sync-mautic-method__body">Adds order fields to the WP Mautic pageview on the confirmation page. Requires WP Mautic. Uses cookies. Mautic already attributes the email from that page hit. Line items are capped at 20.</span>
+					<span class="sync-mautic-method__body"><?php esc_html_e('Tracks orders through the confirmation page using WP Mautic and cookies. Supports up to 20 line items. Requires WP Mautic.', 'sync-mautic'); ?></span>
 				</label>
 				<label class="sync-mautic-method" for="order_tracking_method_webhook">
 					<span class="sync-mautic-method__title">
+						<span class="dashicons dashicons-share" aria-hidden="true"></span>
 						<input type="radio" name="dogbytemarketing_sync_mautic_settings[order_tracking_method]" id="order_tracking_method_webhook" value="webhook" <?php checked($order_tracking_method, 'webhook'); ?> />
-						Signed webhook
+						<?php esc_html_e('Signed Webhook', 'sync-mautic'); ?>
 					</span>
-					<span class="sync-mautic-method__body">Server-to-server POST when the order is completed. Does not set cookies, but still processes personal data. Requires eCommerce Connector 1.3.0. Enable Collect clickthrough to attribute revenue to the clicked email.</span>
+					<span class="sync-mautic-method__body"><?php esc_html_e('Sends completed orders directly to Mautic without setting cookies. Supports all line items. Requires eCommerce Connector 1.3.0.', 'sync-mautic'); ?></span>
 				</label>
 			</div>
 
-			<div class="sync-mautic-option">
-				<label for="order_line_items">
-					<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_line_items]" id="order_line_items" value="on" <?php checked(1, $order_line_items, true); ?> />
-					Send line items
-				</label>
-				<p class="description">Include product ID, name, quantity, and first category. Requires eCommerce Connector 1.3.0. Defaults to off. Page hits send the first 20 line items; signed webhook sends every line item.</p>
-			</div>
+			<label class="sync-mautic-toggle" for="order_line_items">
+				<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[order_line_items]" id="order_line_items" value="on" <?php checked(1, $order_line_items, true); ?> />
+				<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+				<?php esc_html_e('Send order line items', 'sync-mautic'); ?>
+			</label>
+			<p class="sync-mautic-woo__help"><?php esc_html_e('Include product ID, name, quantity, and first category. Requires eCommerce Connector 1.3.0.', 'sync-mautic'); ?></p>
 
-			<div id="sync-mautic-webhook-options">
-				<div class="sync-mautic-option">
-					<label for="collect_clickthrough">
-						<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[collect_clickthrough]" id="collect_clickthrough" value="on" <?php checked(1, $collect_clickthrough, true); ?> />
-						Collect clickthrough
-					</label>
-					<p class="description">Signed webhook only. Stores the Mautic <code>ct</code> token in a first-party cookie for 30 days and sends it with the webhook so revenue can be attributed to that email. Defaults to off. Update your privacy and cookie policies along with cookie acceptance banners before enabling.</p>
-				</div>
-				<p class="sync-mautic-label"><label for="webhook_secret">Webhook secret</label></p>
+			<div id="sync-mautic-webhook-options"<?php echo $order_tracking_method === 'webhook' ? '' : ' class="is-hidden"'; ?>>
+				<label class="sync-mautic-toggle" for="collect_clickthrough">
+					<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[collect_clickthrough]" id="collect_clickthrough" value="on" <?php checked(1, $collect_clickthrough, true); ?> />
+					<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+					<?php esc_html_e('Collect clickthrough', 'sync-mautic'); ?>
+				</label>
+				<p class="sync-mautic-woo__help"><?php esc_html_e('Signed webhook only. Stores the Mautic ct token so revenue can be attributed to the clicked email.', 'sync-mautic'); ?></p>
+				<label class="sync-mautic-general__label" for="webhook_secret"><?php esc_html_e('Webhook secret', 'sync-mautic'); ?></label>
 				<input type="password" class="sync-mautic-input" name="dogbytemarketing_sync_mautic_settings[webhook_secret]" id="webhook_secret" value="<?php echo esc_attr($webhook_secret); ?>" autocomplete="new-password" />
-				<p class="description">Required for signed webhook. Paste the webhook secret from Mautic -> Plugins -> Ecommerce Connector -> Webhook. This is not your OAuth Client Secret.</p>
+				<p class="sync-mautic-woo__help"><?php esc_html_e('Paste the webhook secret from Mautic. This is not your OAuth client secret.', 'sync-mautic'); ?></p>
 			</div>
 		</div>
-		<script>
-		(function () {
-			function syncMauticToggleOrderTracking() {
-				var enabled = document.getElementById('order_tracking');
-				var webhook = document.getElementById('order_tracking_method_webhook');
-				var options = document.getElementById('sync-mautic-order-tracking-options');
-				var secretRow = document.getElementById('sync-mautic-webhook-options');
-				if (!enabled || !webhook || !options || !secretRow) {
-					return;
-				}
-				options.classList.toggle('is-disabled', !enabled.checked);
-				secretRow.style.display = webhook.checked ? 'block' : 'none';
-			}
-			document.getElementById('order_tracking') && document.getElementById('order_tracking').addEventListener('change', syncMauticToggleOrderTracking);
-			document.getElementById('order_tracking_method_page_hits') && document.getElementById('order_tracking_method_page_hits').addEventListener('change', syncMauticToggleOrderTracking);
-			document.getElementById('order_tracking_method_webhook') && document.getElementById('order_tracking_method_webhook').addEventListener('change', syncMauticToggleOrderTracking);
-			syncMauticToggleOrderTracking();
-		})();
-		</script>
+		<p class="sync-mautic-notice"><span class="dashicons dashicons-shield" aria-hidden="true"></span><span><strong><?php esc_html_e('Privacy and data protection', 'sync-mautic'); ?></strong> <?php esc_html_e('Order, purchase, and revenue data may be sent to Mautic for marketing analytics, email attribution, segmentation, and contact profiling. Update your privacy and cookie disclosures accordingly. Signed webhooks still process personal data. Tracking begins after enabling this feature.', 'sync-mautic'); ?></span></p>
 	<?php
 	}
 	
 	public function resync_past_orders_render() {
     $resync_past_orders = isset($this->settings['resync_past_orders']) ? $this->settings['resync_past_orders'] : '';
 	?>
-    <label class="sync-mautic-switch" for="resync_past_orders">
-		<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[resync_past_orders]" id="resync_past_orders" <?php checked(1, $resync_past_orders, true); ?> />
-		Resync past orders
-	</label>
-		<p class="description">Check this if you change order tagging and want past completed orders tagged again. This only re-applies tags. It does not send past orders to Ecommerce Connector tracking.</p>
+		<label class="sync-mautic-toggle" for="resync_past_orders">
+			<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[resync_past_orders]" id="resync_past_orders" value="on" <?php checked(1, $resync_past_orders, true); ?> />
+			<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+			<?php esc_html_e('Resync past orders', 'sync-mautic'); ?>
+		</label>
+		<p class="sync-mautic-woo__help"><?php esc_html_e('Reapply tags to previously completed orders without resending revenue tracking data.', 'sync-mautic'); ?></p>
+		<p class="sync-mautic-notice"><span class="dashicons dashicons-warning" aria-hidden="true"></span><span><?php esc_html_e('Links Mautic contacts to WordPress users. Review your data protection obligations before enabling.', 'sync-mautic'); ?></span></p>
 	<?php
 	}
 	
@@ -1759,9 +1842,10 @@ class Sync_Mautic
 	public function debug_mode_render() {
     $debug_mode = isset($this->settings['debug_mode']) ? $this->settings['debug_mode'] : '';
 	?>
-    <label class="sync-mautic-switch" for="debug_mode">
+    <label class="sync-mautic-toggle" for="debug_mode">
 		<input type="checkbox" name="dogbytemarketing_sync_mautic_settings[debug_mode]" id="debug_mode" <?php checked(1, $debug_mode, true); ?> />
-		Enable debug logging
+		<span class="sync-mautic-toggle__switch" aria-hidden="true"></span>
+		<span class="screen-reader-text"><?php esc_html_e('Enable logging', 'sync-mautic'); ?></span>
 	</label>
 	<?php
 	}
@@ -1771,20 +1855,317 @@ class Sync_Mautic
 	 *
 	 * @return void
 	 */
+	/**
+	 * Render the support tab.
+	 *
+	 * @return void
+	 */
+	public function support_panel_render() {
+		$plugin_version    = self::VERSION;
+		$wordpress_version = get_bloginfo('version');
+		$php_version       = PHP_VERSION;
+		$copy_text         = 'Sync Mautic version: ' . $plugin_version . "\n" . 'WordPress version: ' . $wordpress_version . "\n" . 'PHP version: ' . $php_version;
+		$forum_url         = 'https://wordpress.org/support/plugin/sync-mautic/';
+		$new_topic_url     = 'https://wordpress.org/support/plugin/sync-mautic/#new-post';
+		$review_url        = 'https://wordpress.org/support/plugin/sync-mautic/reviews/#new-post';
+		?>
+		<div class="sync-mautic-support">
+			<h2 class="sync-mautic-support__title"><?php esc_html_e('How can we help?', 'sync-mautic'); ?></h2>
+			<p class="sync-mautic-support__intro"><?php esc_html_e('Get help with Sync Mautic, report issues, or share your feedback.', 'sync-mautic'); ?></p>
+			<div class="sync-mautic-support__cards">
+				<article class="sync-mautic-support__card">
+					<h3 class="sync-mautic-support__card-title"><span class="dashicons dashicons-sos" aria-hidden="true"></span><?php esc_html_e('Get Support', 'sync-mautic'); ?></h3>
+					<p class="sync-mautic-support__card-text"><?php esc_html_e('Visit the WordPress support forum to ask questions or get help.', 'sync-mautic'); ?></p>
+					<a class="sync-mautic-support__button" href="<?php echo esc_url($forum_url); ?>" target="_blank" rel="noopener noreferrer">
+						<?php esc_html_e('Visit Support Forum', 'sync-mautic'); ?>
+					</a>
+				</article>
+				<article class="sync-mautic-support__card">
+					<h3 class="sync-mautic-support__card-title"><span class="dashicons dashicons-warning" aria-hidden="true"></span><?php esc_html_e('Report a Bug', 'sync-mautic'); ?></h3>
+					<p class="sync-mautic-support__card-text"><?php esc_html_e('Found something that isn\'t working as expected? Let us know.', 'sync-mautic'); ?></p>
+					<a class="sync-mautic-support__button" href="<?php echo esc_url($new_topic_url); ?>" target="_blank" rel="noopener noreferrer">
+						<?php esc_html_e('Report an Issue', 'sync-mautic'); ?>
+					</a>
+				</article>
+				<article class="sync-mautic-support__card">
+					<h3 class="sync-mautic-support__card-title"><span class="dashicons dashicons-lightbulb" aria-hidden="true"></span><?php esc_html_e('Request a Feature', 'sync-mautic'); ?></h3>
+					<p class="sync-mautic-support__card-text"><?php esc_html_e('Have an idea to make Sync Mautic better?', 'sync-mautic'); ?></p>
+					<a class="sync-mautic-support__button" href="<?php echo esc_url($new_topic_url); ?>" target="_blank" rel="noopener noreferrer">
+						<?php esc_html_e('Share an Idea', 'sync-mautic'); ?>
+					</a>
+				</article>
+			</div>
+			<div class="sync-mautic-support__lower">
+				<article class="sync-mautic-support__card">
+					<h3 class="sync-mautic-support__card-title"><span class="dashicons dashicons-editor-ul" aria-hidden="true"></span><?php esc_html_e('System Information', 'sync-mautic'); ?></h3>
+					<dl class="sync-mautic-support__info">
+						<div class="sync-mautic-support__row">
+							<dt><?php esc_html_e('Sync Mautic version', 'sync-mautic'); ?></dt>
+							<dd><?php echo esc_html($plugin_version); ?></dd>
+						</div>
+						<div class="sync-mautic-support__row">
+							<dt><?php esc_html_e('WordPress version', 'sync-mautic'); ?></dt>
+							<dd><?php echo esc_html($wordpress_version); ?></dd>
+						</div>
+						<div class="sync-mautic-support__row">
+							<dt><?php esc_html_e('PHP version', 'sync-mautic'); ?></dt>
+							<dd><?php echo esc_html($php_version); ?></dd>
+						</div>
+					</dl>
+					<button type="button" class="sync-mautic-support__button sync-mautic-support__button--ghost sync-mautic-support__copy" data-copy="<?php echo esc_attr($copy_text); ?>" data-copied="<?php esc_attr_e('Copied', 'sync-mautic'); ?>">
+						<span class="sync-mautic-support__copy-label"><?php esc_html_e('Copy System Info', 'sync-mautic'); ?></span>
+					</button>
+				</article>
+				<article class="sync-mautic-support__card sync-mautic-support__card--review">
+					<h3 class="sync-mautic-support__card-title"><span class="dashicons dashicons-heart" aria-hidden="true"></span><?php esc_html_e('Enjoying Sync Mautic?', 'sync-mautic'); ?></h3>
+					<div class="sync-mautic-support__stars" role="group" aria-label="<?php esc_attr_e('Rate Sync Mautic', 'sync-mautic'); ?>">
+						<button type="button" class="sync-mautic-support__star dashicons dashicons-star-empty" data-rating="1" aria-haspopup="dialog">
+							<span class="screen-reader-text"><?php esc_html_e('1 star', 'sync-mautic'); ?></span>
+						</button>
+						<button type="button" class="sync-mautic-support__star dashicons dashicons-star-empty" data-rating="2" aria-haspopup="dialog">
+							<span class="screen-reader-text"><?php esc_html_e('2 stars', 'sync-mautic'); ?></span>
+						</button>
+						<button type="button" class="sync-mautic-support__star dashicons dashicons-star-empty" data-rating="3" aria-haspopup="dialog">
+							<span class="screen-reader-text"><?php esc_html_e('3 stars', 'sync-mautic'); ?></span>
+						</button>
+						<a class="sync-mautic-support__star dashicons dashicons-star-empty" data-rating="4" href="<?php echo esc_url($review_url); ?>" target="_blank" rel="noopener noreferrer">
+							<span class="screen-reader-text"><?php esc_html_e('4 stars', 'sync-mautic'); ?></span>
+						</a>
+						<a class="sync-mautic-support__star dashicons dashicons-star-empty" data-rating="5" href="<?php echo esc_url($review_url); ?>" target="_blank" rel="noopener noreferrer">
+							<span class="screen-reader-text"><?php esc_html_e('5 stars', 'sync-mautic'); ?></span>
+						</a>
+					</div>
+					<a class="sync-mautic-support__button" href="<?php echo esc_url($review_url); ?>" target="_blank" rel="noopener noreferrer">
+						<?php esc_html_e('Leave a Review', 'sync-mautic'); ?>
+					</a>
+				</article>
+			</div>
+			<dialog class="sync-mautic-review-prompt" aria-labelledby="sync-mautic-review-prompt-title" aria-describedby="sync-mautic-review-prompt-text">
+				<h2 class="sync-mautic-review-prompt__title" id="sync-mautic-review-prompt-title"><?php esc_html_e('We strive to provide top-notch plugins', 'sync-mautic'); ?></h2>
+				<p class="sync-mautic-review-prompt__text" id="sync-mautic-review-prompt-text"><?php esc_html_e("We'd love to try to make your experience better. Would you be willing to reach out directly to us for help?", 'sync-mautic'); ?></p>
+				<div class="sync-mautic-review-prompt__actions">
+					<a class="sync-mautic-support__button sync-mautic-review-prompt__close" href="<?php echo esc_url($review_url); ?>" target="_blank" rel="noopener noreferrer">
+						<?php esc_html_e('Not Now', 'sync-mautic'); ?>
+					</a>
+					<a class="sync-mautic-support__button sync-mautic-review-prompt__reach" href="<?php echo esc_url('https://www.dogbytemarketing.com/contact/'); ?>" target="_blank" rel="noopener noreferrer">
+						<?php esc_html_e('Reach Out', 'sync-mautic'); ?>
+					</a>
+				</div>
+			</dialog>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render options page
+	 *
+	 * @return void
+	 */
 	public function options_page() {
+		$has_woocommerce = class_exists('WooCommerce');
 	?>
 		<div class="wrap sync-mautic-settings">
+			<?php // Core inserts admin notices after this. The title lives inside the header row, so without this marker notices sit beside Save Changes. ?>
+			<hr class="wp-header-end" />
 			<form action="options.php" method="post">
-				<h1>Sync Mautic Settings</h1>
-
-				<?php
-				settings_fields('dogbytemarketing_sync_mautic');
-				do_settings_sections('dogbytemarketing_sync_mautic');
-				?>
-				<div class="sync-mautic-support">
-					If you need assistance with your email marketing efforts, we at <a href="https://www.dogbytemarketing.com" target="_blank" rel="noopener noreferrer">Dog Byte Marketing</a> are here to help. Call <a href="tel:4237248922">(423) 724-8922</a>. We're based in Tennessee in the US.
+				<?php settings_fields('dogbytemarketing_sync_mautic'); ?>
+				<div class="sync-mautic-settings__layout">
+					<div class="sync-mautic-settings__workspace">
+						<div class="sync-mautic-settings__header">
+							<div class="sync-mautic-settings__logo">
+								<img class="sync-mautic-settings__logo-img" src="<?php echo esc_url(plugins_url('assets/img/logo.png', __FILE__)); ?>" alt="<?php esc_attr_e('Sync Mautic', 'sync-mautic'); ?>" width="150" height="50" />
+								<img class="sync-mautic-settings__logo-icon" src="<?php echo esc_url(plugins_url('assets/img/icon.png', __FILE__)); ?>" alt="" width="48" height="48" />
+							</div>
+							<div class="sync-mautic-settings__heading">
+								<div class="sync-mautic-settings__heading-text">
+									<h1 class="sync-mautic-settings__title" id="sync-mautic-active-title"><?php esc_html_e('General', 'sync-mautic'); ?></h1>
+									<p class="sync-mautic-settings__summary" id="sync-mautic-active-summary"><?php esc_html_e('Connect and manage your Mautic integration.', 'sync-mautic'); ?></p>
+								</div>
+								<button type="submit" class="sync-mautic-save"><?php esc_html_e('Save Changes', 'sync-mautic'); ?></button>
+							</div>
+						</div>
+						<div class="sync-mautic-settings__body">
+							<nav class="sync-mautic-nav" aria-label="<?php esc_attr_e('Settings sections', 'sync-mautic'); ?>">
+								<div class="sync-mautic-nav__list" role="tablist">
+									<button type="button" class="sync-mautic-nav__tab is-active" id="sync-mautic-tab-general" role="tab" data-tab="#sync-mautic-panel-general" data-description="<?php esc_attr_e('Connect and manage your Mautic integration.', 'sync-mautic'); ?>" aria-controls="sync-mautic-panel-general" aria-selected="true">
+										<span class="dashicons dashicons-admin-settings" aria-hidden="true"></span>
+										<span class="sync-mautic-nav__label"><?php esc_html_e('General', 'sync-mautic'); ?></span>
+									</button>
+									<?php if ($has_woocommerce) : ?>
+									<button type="button" class="sync-mautic-nav__tab" id="sync-mautic-tab-woocommerce" role="tab" data-tab="#sync-mautic-panel-woocommerce" data-description="<?php esc_attr_e('Tag purchases, collect checkout opt-ins, and track order revenue.', 'sync-mautic'); ?>" aria-controls="sync-mautic-panel-woocommerce" aria-selected="false">
+										<span class="dashicons dashicons-cart" aria-hidden="true"></span>
+										<span class="sync-mautic-nav__label"><?php esc_html_e('WooCommerce', 'sync-mautic'); ?></span>
+									</button>
+									<button type="button" class="sync-mautic-nav__tab" id="sync-mautic-tab-advanced" role="tab" data-tab="#sync-mautic-panel-advanced" data-description="<?php esc_attr_e('Logging for troubleshooting.', 'sync-mautic'); ?>" aria-controls="sync-mautic-panel-advanced" aria-selected="false">
+										<span class="dashicons dashicons-admin-tools" aria-hidden="true"></span>
+										<span class="sync-mautic-nav__label"><?php esc_html_e('Debug', 'sync-mautic'); ?></span>
+									</button>
+									<?php endif; ?>
+									<button type="button" class="sync-mautic-nav__tab" id="sync-mautic-tab-support" role="tab" data-tab="#sync-mautic-panel-support" data-description="<?php esc_attr_e('Get help with Sync Mautic, report issues, or share your feedback.', 'sync-mautic'); ?>" aria-controls="sync-mautic-panel-support" aria-selected="false">
+										<span class="dashicons dashicons-sos" aria-hidden="true"></span>
+										<span class="sync-mautic-nav__label"><?php esc_html_e('Support', 'sync-mautic'); ?></span>
+									</button>
+								</div>
+							</nav>
+							<div class="sync-mautic-main">
+								<section id="sync-mautic-panel-general" class="sync-mautic-panel is-active" role="tabpanel" aria-labelledby="sync-mautic-active-title">
+									<?php $this->connection_status_render(); ?>
+									<div class="sync-mautic-general__columns">
+										<div class="sync-mautic-general__column">
+											<h2 class="sync-mautic-general__title"><?php esc_html_e('API Configuration', 'sync-mautic'); ?></h2>
+											<p class="sync-mautic-general__intro"><?php esc_html_e('Enter your Mautic API credentials below.', 'sync-mautic'); ?></p>
+											<div class="sync-mautic-general__field"><?php $this->base_url_render(); ?></div>
+											<div class="sync-mautic-general__field"><?php $this->client_id_render(); ?></div>
+											<div class="sync-mautic-general__field"><?php $this->client_secret_render(); ?></div>
+											<button type="button" class="sync-mautic-test" data-nonce="<?php echo esc_attr(wp_create_nonce('sync_mautic_test_connection')); ?>">
+												<span class="dashicons dashicons-update" aria-hidden="true"></span>
+												<span class="sync-mautic-test__label"><?php esc_html_e('Test Connection', 'sync-mautic'); ?></span>
+											</button>
+											<p class="sync-mautic-test__result" role="status"></p>
+										</div>
+										<div class="sync-mautic-general__column">
+											<?php $this->api_howto_render(); ?>
+										</div>
+									</div>
+								</section>
+								<?php if ($has_woocommerce) : ?>
+								<section id="sync-mautic-panel-woocommerce" class="sync-mautic-panel" role="tabpanel" aria-labelledby="sync-mautic-active-title" hidden>
+									<div class="sync-mautic-woo">
+										<div class="sync-mautic-woo__top">
+											<article class="sync-mautic-woo__card">
+												<div class="sync-mautic-woo__head">
+													<span class="dashicons dashicons-tag" aria-hidden="true"></span>
+													<h2><?php esc_html_e('Order Tagging', 'sync-mautic'); ?></h2>
+												</div>
+												<p class="sync-mautic-woo__intro"><?php esc_html_e('Automatically tag existing Mautic contacts based on completed purchases.', 'sync-mautic'); ?></p>
+												<?php $this->order_tagging_render(); ?>
+												<hr class="sync-mautic-woo__rule" />
+												<?php $this->resync_past_orders_render(); ?>
+											</article>
+											<article class="sync-mautic-woo__card">
+												<div class="sync-mautic-woo__head">
+													<span class="dashicons dashicons-email" aria-hidden="true"></span>
+													<h2><?php esc_html_e('Checkout Optin', 'sync-mautic'); ?></h2>
+												</div>
+												<p class="sync-mautic-woo__intro"><?php esc_html_e('Collect newsletter subscribers during WooCommerce checkout.', 'sync-mautic'); ?></p>
+												<?php $this->checkout_optin_render(); ?>
+											</article>
+										</div>
+										<article class="sync-mautic-woo__card">
+											<?php $this->order_tracking_render(); ?>
+										</article>
+									</div>
+								</section>
+								<section id="sync-mautic-panel-advanced" class="sync-mautic-panel" role="tabpanel" aria-labelledby="sync-mautic-active-title" hidden>
+									<div class="sync-mautic-general__settings">
+										<h2 class="sync-mautic-general__title"><?php esc_html_e('Debug', 'sync-mautic'); ?></h2>
+										<article class="sync-mautic-general__card">
+											<div class="sync-mautic-general__card-head">
+												<h3 class="sync-mautic-general__card-title"><?php esc_html_e('Logging', 'sync-mautic'); ?></h3>
+												<?php $this->debug_mode_render(); ?>
+											</div>
+										</article>
+									</div>
+								</section>
+								<?php endif; ?>
+								<section id="sync-mautic-panel-support" class="sync-mautic-panel" role="tabpanel" aria-labelledby="sync-mautic-active-title" hidden>
+									<?php $this->support_panel_render(); ?>
+								</section>
+							</div>
+							<div class="sync-mautic-settings__savebar">
+								<button type="submit" class="sync-mautic-save"><?php esc_html_e('Save Changes', 'sync-mautic'); ?></button>
+							</div>
+						</div>
+					</div>
+					<div class="sync-mautic-cta-stack">
+						<aside class="sync-mautic-cta">
+							<div class="sync-mautic-cta__brand">
+								<div class="sync-mautic-cta__brand-top">
+									<img class="sync-mautic-cta__logo" src="<?php echo esc_url(plugins_url('assets/img/dog-byte-logo-white.png', __FILE__)); ?>" alt="<?php esc_attr_e('Dog Byte Marketing', 'sync-mautic'); ?>" width="120" />
+								</div>
+								<h2 class="sync-mautic-cta__title"><?php esc_html_e('Get More Out of Mautic', 'sync-mautic'); ?></h2>
+								<p class="sync-mautic-cta__desc"><?php esc_html_e('Take your marketing automation further with expert Mautic development, custom integrations, and dedicated support.', 'sync-mautic'); ?></p>
+							</div>
+							<div class="sync-mautic-cta__body">
+								<ul class="sync-mautic-cta__benefits">
+									<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Custom Mautic development', 'sync-mautic'); ?></li>
+									<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Seamless API and platform integrations', 'sync-mautic'); ?></li>
+									<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Expert troubleshooting and support', 'sync-mautic'); ?></li>
+								</ul>
+								<a class="sync-mautic-cta__button" href="<?php echo esc_url('https://www.dogbytemarketing.com/service/mautic-development/'); ?>" target="_blank" rel="noopener noreferrer">
+									<?php esc_html_e('Explore Mautic Services', 'sync-mautic'); ?>
+									<span class="dashicons dashicons-arrow-right-alt" aria-hidden="true"></span>
+								</a>
+								<a class="sync-mautic-cta__button sync-mautic-cta__button--call" href="<?php echo esc_url('tel:+14237248922'); ?>">
+									<span class="dashicons dashicons-phone" aria-hidden="true"></span>
+									<?php esc_html_e('(423) 724-8922', 'sync-mautic'); ?>
+								</a>
+								<hr class="sync-mautic-cta__rule" />
+								<p class="sync-mautic-cta__location"><?php esc_html_e('USA Based · Serving Businesses Nationwide', 'sync-mautic'); ?></p>
+							</div>
+						</aside>
+						<aside class="sync-mautic-plugins" aria-roledescription="carousel" aria-label="<?php esc_attr_e('Other plugins', 'sync-mautic'); ?>">
+							<div class="sync-mautic-cta__brand sync-mautic-plugins__header">
+								<h2 class="sync-mautic-cta__title"><?php esc_html_e('Explore Our Other Plugins', 'sync-mautic'); ?></h2>
+							</div>
+							<div class="sync-mautic-plugins__viewport">
+								<div class="sync-mautic-plugins__track">
+									<div class="sync-mautic-plugins__slide">
+										<img class="sync-mautic-plugins__icon" src="<?php echo esc_url(plugins_url('assets/img/plugins/projectplot.png', __FILE__)); ?>" alt="" width="72" height="72" />
+										<h3 class="sync-mautic-plugins__name"><?php esc_html_e('ProjectPlot', 'sync-mautic'); ?></h3>
+										<p class="sync-mautic-plugins__summary"><?php esc_html_e('Simplify task management and keep your team organized directly within WordPress.', 'sync-mautic'); ?></p>
+										<ul class="sync-mautic-cta__benefits">
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Create and manage tasks with ease', 'sync-mautic'); ?></li>
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Track task priorities and progress', 'sync-mautic'); ?></li>
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Keep your team organized', 'sync-mautic'); ?></li>
+										</ul>
+										<a class="sync-mautic-cta__button" href="https://wordpress.org/plugins/projectplot/" target="_blank" rel="noopener noreferrer">
+											<?php esc_html_e('Check Out ProjectPlot', 'sync-mautic'); ?>
+											<span class="dashicons dashicons-arrow-right-alt" aria-hidden="true"></span>
+										</a>
+									</div>
+									<div class="sync-mautic-plugins__slide">
+										<img class="sync-mautic-plugins__icon" src="<?php echo esc_url(plugins_url('assets/img/plugins/faq-schema-shortcode.png', __FILE__)); ?>" alt="" width="72" height="72" />
+										<h3 class="sync-mautic-plugins__name"><?php esc_html_e('FAQ Schema Shortcode', 'sync-mautic'); ?></h3>
+										<p class="sync-mautic-plugins__summary"><?php esc_html_e('Add FAQ sections with structured data so search engines can understand your content.', 'sync-mautic'); ?></p>
+										<ul class="sync-mautic-cta__benefits">
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Add FAQ sections with shortcodes', 'sync-mautic'); ?></li>
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Generate JSON-LD structured data', 'sync-mautic'); ?></li>
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Improve search visibility', 'sync-mautic'); ?></li>
+										</ul>
+										<a class="sync-mautic-cta__button" href="https://wordpress.org/plugins/faq-schema-shortcode/" target="_blank" rel="noopener noreferrer">
+											<?php esc_html_e('Check Out FAQ Schema Shortcode', 'sync-mautic'); ?>
+											<span class="dashicons dashicons-arrow-right-alt" aria-hidden="true"></span>
+										</a>
+									</div>
+									<div class="sync-mautic-plugins__slide">
+										<img class="sync-mautic-plugins__icon" src="<?php echo esc_url(plugins_url('assets/img/plugins/user-notifications.png', __FILE__)); ?>" alt="" width="72" height="72" />
+										<h3 class="sync-mautic-plugins__name"><?php esc_html_e('User Notifications', 'sync-mautic'); ?></h3>
+										<p class="sync-mautic-plugins__summary"><?php esc_html_e('Keep WordPress and WooCommerce users informed with notifications directly on your website.', 'sync-mautic'); ?></p>
+										<ul class="sync-mautic-cta__benefits">
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Share updates and promotions', 'sync-mautic'); ?></li>
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Automate order notifications', 'sync-mautic'); ?></li>
+											<li><span class="dashicons dashicons-yes" aria-hidden="true"></span><?php esc_html_e('Highlight unread notifications', 'sync-mautic'); ?></li>
+										</ul>
+										<a class="sync-mautic-cta__button" href="https://wordpress.org/plugins/user-notifications/" target="_blank" rel="noopener noreferrer">
+											<?php esc_html_e('Check Out User Notifications', 'sync-mautic'); ?>
+											<span class="dashicons dashicons-arrow-right-alt" aria-hidden="true"></span>
+										</a>
+									</div>
+								</div>
+							</div>
+							<div class="sync-mautic-plugins__dots">
+								<button type="button" class="sync-mautic-plugins__dot is-active" aria-label="<?php esc_attr_e('Show ProjectPlot', 'sync-mautic'); ?>" aria-selected="true"></button>
+								<button type="button" class="sync-mautic-plugins__dot" aria-label="<?php esc_attr_e('Show FAQ Schema Shortcode', 'sync-mautic'); ?>" aria-selected="false"></button>
+								<button type="button" class="sync-mautic-plugins__dot" aria-label="<?php esc_attr_e('Show User Notifications', 'sync-mautic'); ?>" aria-selected="false"></button>
+							</div>
+							<div class="sync-mautic-plugins__foot">
+								<hr class="sync-mautic-cta__rule" />
+								<p class="sync-mautic-cta__location"><?php esc_html_e('Free & Open Source · WordPress.org', 'sync-mautic'); ?></p>
+							</div>
+						</aside>
+					</div>
 				</div>
-				<?php submit_button(); ?>
 			</form>
 		</div>
 	<?php
@@ -1912,7 +2293,7 @@ class Sync_Mautic
    */
   public function display_notice() {
     ?>
-    <div class="notice notice-<?php echo esc_attr($this->admin_notice['type']); ?>">
+    <div class="notice notice-<?php echo esc_attr($this->admin_notice['type']); ?> sync-mautic">
       <p>
 				<?php
 				echo wp_kses(
@@ -1959,7 +2340,7 @@ class Sync_Mautic
 		);
 		$settings_url = admin_url('options-general.php?page=sync-mautic');
 		?>
-		<div class="notice notice-info">
+		<div class="notice notice-info sync-mautic">
 			<p>
 				<strong>Sync Mautic 1.1.0:</strong>
 				WooCommerce order tracking now has optional line items and a signed webhook method. Both default to off.
@@ -1997,6 +2378,59 @@ class Sync_Mautic
 
 		wp_safe_redirect($redirect);
 		exit;
+	}
+
+	/**
+	 * Test the Mautic credentials currently typed on the settings page.
+	 *
+	 * @return void
+	 */
+	public function ajax_test_connection() {
+		if (!current_user_can('manage_options')) {
+			wp_send_json_error(array('message' => __('Not connected', 'sync-mautic')), 403);
+		}
+
+		check_ajax_referer('sync_mautic_test_connection', 'nonce');
+
+		$base_url      = isset($_POST['base_url']) ? esc_url_raw(wp_unslash($_POST['base_url'])) : '';
+		$client_id     = isset($_POST['client_id']) ? sanitize_text_field(wp_unslash($_POST['client_id'])) : '';
+		$client_secret = isset($_POST['client_secret']) ? sanitize_text_field(wp_unslash($_POST['client_secret'])) : '';
+		$base_url      = untrailingslashit($base_url);
+
+		if (!$base_url || !$client_id || !$client_secret) {
+			wp_send_json_error(array('message' => __('Enter a base URL, client ID, and client secret first.', 'sync-mautic')));
+		}
+
+		$request = wp_remote_post($base_url . '/oauth/v2/token', array(
+			'timeout' => 15,
+			'body'    => array(
+				'client_id'     => $client_id,
+				'client_secret' => $client_secret,
+				'grant_type'    => 'client_credentials',
+			),
+		));
+
+		if (is_wp_error($request)) {
+			wp_send_json_error(array('message' => sanitize_text_field($request->get_error_message())));
+		}
+
+		$code = (int) wp_remote_retrieve_response_code($request);
+		$body = json_decode(wp_remote_retrieve_body($request), true);
+
+		if (($code === 200 || $code === 201) && is_array($body) && !empty($body['access_token'])) {
+			$saved_url    = isset($this->settings['base_url']) ? untrailingslashit($this->settings['base_url']) : '';
+			$saved_id     = isset($this->settings['client_id']) ? $this->settings['client_id'] : '';
+			$saved_secret = isset($this->settings['client_secret']) ? $this->settings['client_secret'] : '';
+
+			if ($base_url === $saved_url && $client_id === $saved_id && $client_secret === $saved_secret) {
+				$expires = isset($body['expires_in']) && is_numeric($body['expires_in']) ? (int) $body['expires_in'] : HOUR_IN_SECONDS;
+				set_transient('dogbytemarketing_mautic_access_token', sanitize_text_field($body['access_token']), $expires);
+			}
+
+			wp_send_json_success(array('message' => __('Connected', 'sync-mautic')));
+		}
+
+		wp_send_json_error(array('message' => __('Mautic refused the connection. Check the client ID and client secret.', 'sync-mautic')));
 	}
 	
 	/**

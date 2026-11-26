@@ -97,6 +97,10 @@ You are solely responsible for how you deploy and use this plugin, including com
 
 ## Changelog
 
+### 1.2.0 =
+- Added: New settings design
+- Updated: Tested up to
+
 ### 1.1.0
 - Added: Optional line items on WooCommerce order tracking (product ID, name, quantity, first category). Requires eCommerce Connector 1.3.0. Defaults to off.
 - Added: Signed webhook tracking method as an exclusive alternative to page hits. Requires eCommerce Connector 1.3.0 and the Ecommerce Connector webhook secret.
