@@ -22,6 +22,8 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 - Tag subscribed contacts with categories they have purchased from
 - Tag subscribed contacts with brands they have purchased from
 
+Want to help? Submit a PR on [Github](https://github.com/DogByteMarketing/sync-mautic/).
+
 ## Roadmap
 
 - Add translations
@@ -43,7 +45,9 @@ Mautic is an excellent Open Source Email and SMS marketing tool, but it lacks th
 
 ## Screenshots
 
-![Plugin Settings](.wordpress-org/screenshot-1.jpg)
+![General Settings](.wordpress-org/screenshot-1.jpg)
+![WooCommerce Settings](.wordpress-org/screenshot-2.jpg)
+![Advanced Settings](.wordpress-org/screenshot-3.jpg)
 
 ## GDPR and privacy
 
@@ -96,6 +100,11 @@ This software is provided **as is**, without warranty of any kind, express or im
 You are solely responsible for how you deploy and use this plugin, including compliance with applicable laws and data protection obligations.
 
 ## Changelog
+
+### 1.2.0 =
+- Added: New settings design
+- Updated: Tested up to
+- Bugfix: Webhook responses
 
 ### 1.1.0
 - Added: Optional line items on WooCommerce order tracking (product ID, name, quantity, first category). Requires eCommerce Connector 1.3.0. Defaults to off.
