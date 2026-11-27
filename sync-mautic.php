@@ -925,8 +925,9 @@ class Sync_Mautic
 		}
 
 		$response_code = wp_remote_retrieve_response_code($request);
-
-		if ($response_code == 200 || $response_code == 201) {
+    
+    // Ecommerce Connector answers 204 for a delivered webhook, including when it accepts the order.
+    if ($response_code == 200 || $response_code == 201 || $response_code == 204) {
 			$order->update_meta_data(self::META_WEBHOOK_SENT, true);
 			$order->save();
 
@@ -1998,7 +1999,7 @@ class Sync_Mautic
 									</button>
 									<button type="button" class="sync-mautic-nav__tab" id="sync-mautic-tab-advanced" role="tab" data-tab="#sync-mautic-panel-advanced" data-description="<?php esc_attr_e('Logging for troubleshooting.', 'sync-mautic'); ?>" aria-controls="sync-mautic-panel-advanced" aria-selected="false">
 										<span class="dashicons dashicons-admin-tools" aria-hidden="true"></span>
-										<span class="sync-mautic-nav__label"><?php esc_html_e('Debug', 'sync-mautic'); ?></span>
+										<span class="sync-mautic-nav__label"><?php esc_html_e('Advanced', 'sync-mautic'); ?></span>
 									</button>
 									<?php endif; ?>
 									<button type="button" class="sync-mautic-nav__tab" id="sync-mautic-tab-support" role="tab" data-tab="#sync-mautic-panel-support" data-description="<?php esc_attr_e('Get help with Sync Mautic, report issues, or share your feedback.', 'sync-mautic'); ?>" aria-controls="sync-mautic-panel-support" aria-selected="false">
@@ -2058,7 +2059,7 @@ class Sync_Mautic
 								</section>
 								<section id="sync-mautic-panel-advanced" class="sync-mautic-panel" role="tabpanel" aria-labelledby="sync-mautic-active-title" hidden>
 									<div class="sync-mautic-general__settings">
-										<h2 class="sync-mautic-general__title"><?php esc_html_e('Debug', 'sync-mautic'); ?></h2>
+										<h2 class="sync-mautic-general__title"><?php esc_html_e('Advanced', 'sync-mautic'); ?></h2>
 										<article class="sync-mautic-general__card">
 											<div class="sync-mautic-general__card-head">
 												<h3 class="sync-mautic-general__card-title"><?php esc_html_e('Logging', 'sync-mautic'); ?></h3>

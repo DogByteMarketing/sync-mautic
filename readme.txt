@@ -54,7 +54,9 @@ Want to help? Submit a PR on [Github](https://github.com/DogByteMarketing/sync-m
 
 == Screenshots ==
 
-1. Plugin Settings
+1. General Settings
+2. WooCommerce Settings
+3. Advanced Settings
 
 
 == GDPR and privacy ==
@@ -114,6 +116,7 @@ You are solely responsible for how you deploy and use this plugin, including com
 = 1.2.0 =
 * Added: New settings design
 * Updated: Tested up to
+* Bugfix: Webhook responses
 
 = 1.1.0 =
 * Added: Optional line items on WooCommerce order tracking (product ID, name, quantity, first category). Requires eCommerce Connector 1.3.0. Defaults to off.
